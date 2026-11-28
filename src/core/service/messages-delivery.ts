@@ -224,6 +224,9 @@ export class Delivery {
         continue;
       }
       const sentAt = this.nowMs();
+      // A message sent in (not a draft left for a person) is input like any other: a routine
+      // waiting on a question hears it was answered. It isn't a person, so the counts stand.
+      if (enter) this.core.paneInput(item.toPty, `${item.text}\r`, "cli");
       this.lastSent.set(item.toPty, sentAt);
       if (item.counts && enter) {
         const key = pairKey(item.fromPty ?? "outside", item.toPty);

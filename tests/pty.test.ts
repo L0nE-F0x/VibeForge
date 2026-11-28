@@ -5,6 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 import { hostRuntime } from "../electron/supervisor.js";
+import { wrapForCopy } from "../src/core/copy-setup.js";
 
 // Drives the shipped PTY host (electron/pty-host.cjs) over its JSON-lines protocol with
 // plain bash. No model CLI is started.
@@ -228,6 +229,35 @@ describe("pty host", () => {
     expect(screen).toContain("FIRST-2");
     await host.request({ op: "send", ptyId: pty, text: "echo FOLLOW-$((3+3))" });
     await host.until(async () => (await host.screen(pty)).includes("FOLLOW-6"));
+  });
+
+  it("holds a copy's first prompt until the CLI itself has started, however long the setup command is quiet", async () => {
+    const host = await startHost();
+    // A CLI that takes a while to start, then reads its prompt: what the terminal echoes before
+    // CLI-READY was pasted too early.
+    const cli = ["/bin/bash", "--norc", "--noprofile", "-c", "sleep 1.2; echo CLI-READY; read -r line; echo GOT-$line"];
+    const argv = wrapForCopy(cli, { setupCommand: "echo installing; sleep 1.5; echo installed", words: { failed: "setup failed ({code})" }, userShell: "/bin/bash" });
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv, pasteInput: "PASTED-PROMPT" })).ptyId);
+    await host.until(async () => (await host.screen(pty)).includes("GOT-PASTED-PROMPT"), 15000);
+    const screen = await host.screen(pty);
+    expect(screen.indexOf("installed")).toBeLessThan(screen.indexOf("CLI-READY"));
+    expect(screen.indexOf("CLI-READY")).toBeLessThan(screen.indexOf("PASTED-PROMPT"));
+  }, 20000);
+
+  it("says plainly when a copy's setup command fails, and never starts the CLI", async () => {
+    const host = await startHost();
+    const cli = ["/bin/bash", "--norc", "--noprofile", "-c", "echo CLI-RAN"];
+    const argv = wrapForCopy(cli, { setupCommand: "echo trying; exit 3", notes: ["Left out .env: not ignored"], words: { failed: "Setup failed (exit {code}), 100% sure" }, userShell: "/bin/bash" });
+    const runDir = tempDir();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv, runDir, pasteInput: "PASTED-PROMPT" })).ptyId);
+    await host.until(() => host.exitOf(pty) !== undefined);
+    expect(host.exitOf(pty)).toMatchObject({ exitCode: 3 });
+    const screen = fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8");
+    expect(screen).toContain("Left out .env: not ignored");
+    expect(screen).toContain("$ echo trying; exit 3");
+    expect(screen).toContain("Setup failed (exit 3), 100% sure");
+    expect(screen).not.toContain("CLI-RAN");
+    expect(screen).not.toContain("PASTED-PROMPT");
   });
 
   it("reads the foreground program at once, including the moment it leaves", async () => {

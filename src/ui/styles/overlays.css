@@ -273,10 +273,21 @@ button.rail-logo:focus-visible {
   border: 1px solid transparent;
 }
 
-.menu-item:hover {
+.menu-item:not(:disabled):hover {
   background: var(--hover-fill);
   color: var(--fg);
   border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.menu-item:disabled {
+  opacity: 0.58;
+}
+
+.menu-note {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .menu-item:focus-visible,

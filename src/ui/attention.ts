@@ -111,6 +111,8 @@ interface Seen {
   cliSince: number;
   /** Its first screen has been looked at already. */
   firstChecked: boolean;
+  /** A routine run whose turn ended asking the person a question. */
+  needsInput: boolean;
   /** When it last made a sound (ms). */
   knockedAt: number;
   mark: Omit<AttentionMark, "attention" | "since">;
@@ -160,26 +162,40 @@ export function trackLive(live: readonly LiveSession[], looking: Looking | null,
     present.add(session.ptyId);
     const cli = isCli(session);
     const working = Boolean(session.working);
+    const needsInput = Boolean(session.needsInput);
     const before = seen.get(session.ptyId);
     const was: Seen = before
       ? { ...before, mark: details(session) }
-      : { cli: false, working: false, worked: false, cliSince: now, firstChecked: false, knockedAt: -Infinity, mark: details(session) };
+      : { cli: false, working: false, worked: false, cliSince: now, firstChecked: false, needsInput: false, knockedAt: -Infinity, mark: details(session) };
     if (cli && !was.cli) Object.assign(was, { worked: working, cliSince: now, firstChecked: false });
     // Seen by you: its next quiet spell is news again.
     if (watched(was.mark)) was.knockedAt = -Infinity;
-    if (before?.cli && cli && before.working && !working) flag(was, "waiting");
-    else if (before?.cli && !cli) flag(was, "done");
-    else if (cli && !working && !was.worked && !was.firstChecked && now - was.cliSince >= FIRST_SCREEN_MS) {
-      was.firstChecked = true;
-      flag(was, "waiting");
+    if (session.origin === "routine") {
+      // A routine's run ends by itself once its turn finishes, so a quiet spell isn't news: it's
+      // flagged when it stops on a question, or when its first screen sat still from the start
+      // (a trust or sign-in screen VibeForge doesn't know).
+      if (needsInput && !before?.needsInput) flag(was, "waiting");
+      else if (cli && !working && !was.worked && !was.firstChecked && now - was.cliSince >= FIRST_SCREEN_MS) {
+        was.firstChecked = true;
+        flag(was, "waiting");
+      }
+      if (!needsInput && before?.needsInput && next.get(session.ptyId)?.attention === "waiting") next.delete(session.ptyId);
+    } else {
+      if (before?.cli && cli && before.working && !working) flag(was, "waiting");
+      else if (before?.cli && !cli) flag(was, "done");
+      else if (cli && !working && !was.worked && !was.firstChecked && now - was.cliSince >= FIRST_SCREEN_MS) {
+        was.firstChecked = true;
+        flag(was, "waiting");
+      }
     }
     // Busy again: whatever it was waiting for was answered.
     if (cli && working && next.get(session.ptyId)?.attention === "waiting") next.delete(session.ptyId);
-    seen.set(session.ptyId, { ...was, cli, working, worked: was.worked || (cli && working) });
+    seen.set(session.ptyId, { ...was, cli, working, needsInput, worked: was.worked || (cli && working) });
   }
   for (const [ptyId, was] of seen) {
     if (present.has(ptyId)) continue;
-    if (was.cli) flag(was, "done");
+    // Routine runs already notify through ServiceCore.notifyFinished with their result.
+    if (was.cli && was.mark.origin !== "routine") flag(was, "done");
     seen.delete(ptyId);
   }
 

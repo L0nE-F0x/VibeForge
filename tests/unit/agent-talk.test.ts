@@ -1045,6 +1045,40 @@ describe("a lead and its team", () => {
     ctx.svc.close();
   });
 
+  it("says a CLI whose log VibeForge can't read sits at a question, not that it finished, and reports its real answer later", async () => {
+    let at = AT;
+    const { ctx, workspace, sender, taskPtyOf } = await team({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    // Argy, like Antigravity: no session log, so everything is read off its screen.
+    await ctx.svc.saveAgent({ name: "Screener", brief: "b", engine: "argy", places: [workspace.path] });
+    let screen = "Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit";
+    ctx.host.screen = async () => screen;
+    goAhead(ctx);
+    pass(5000);
+    const handed = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "screener", text: "Write notes/ideas.md" });
+    const pty = taskPtyOf(handed.ok ? handed.taskId : "")!;
+    const reports = () => ctx.sent.filter((item) => item.ptyId === sender.ptyId && item.text.startsWith("[Task report"));
+
+    pass(61_000);
+    for (let i = 0; i < 40 && reports().length < 1; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reports()[0].text).toContain("went quiet on the task you handed it");
+    expect(reports()[0].text).not.toContain("finished its turn");
+
+    // Then it gets going, works, and goes quiet with its answer on screen: that is the report.
+    ctx.svc.onPtyActivity(pty, true);
+    pass(2000);
+    screen = "Wrote notes/ideas.md with five ideas.";
+    ctx.svc.onPtyActivity(pty, false);
+    for (let i = 0; i < 100 && reports().length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      pass(1000);
+      await ctx.svc.pumpMessages();
+    }
+    expect(reports()[1].text).toContain("finished its turn on the task you handed it");
+    expect(reports()[1].text).toContain("Wrote notes/ideas.md with five ideas.");
+    ctx.svc.close();
+  });
+
   it("tells the lead its team in this workspace and the rules, and lets its Claude Code run vibeforge", async () => {
     const { ctx, workspace, sender } = await team();
     const rows = JSON.parse(fs.readFileSync(path.join(ctx.configRoot, "engines.json"), "utf8"));

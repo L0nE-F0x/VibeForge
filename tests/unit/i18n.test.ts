@@ -82,5 +82,14 @@ describe("translations", () => {
       tone: "info",
       title: "The copy had no changes, so it was removed",
     });
+    expect(applyToast(t, { files: ["a.txt"], conflicts: [], stayed: 2 }, "VibeForge", "/home/me")).toEqual({
+      tone: "success",
+      title: "Applied to VibeForge; the copy stays",
+      body: "1 file applied, not committed yet. 2 files stayed in the copy.",
+    });
+    expect(applyToast(t, { files: [], conflicts: [], stayed: 1 }, "VibeForge", "/home/me")).toEqual({
+      tone: "info",
+      title: "1 file stayed in the copy.",
+    });
   });
 });

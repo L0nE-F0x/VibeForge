@@ -1,23 +1,64 @@
 import { CronExpressionParser } from "cron-parser";
 import cronstrue from "cronstrue";
-import type { RunMeta, Schedule } from "./types.js";
+import { detectWaitingPrompt } from "../shared/orchestrator-intel.js";
+import { isCutOffRun } from "../shared/routine-result.js";
+import type { RoutineRunResult, RunMeta, Schedule } from "./types.js";
+
+export { isCutOffRun };
 
 export const TICK_MS = 30_000;
 /** Slots older than this (e.g. while asleep) count as missed rather than running late. */
 export const MAX_SLOT_LATENESS_MS = 2 * 60_000;
 export const MIN_INTERVAL_MINUTES = 5;
+export const DEFAULT_ROUTINE_TIMEOUT_MINUTES = 120;
+export const MIN_ROUTINE_TIMEOUT_MINUTES = 5;
+export const MAX_ROUTINE_TIMEOUT_MINUTES = 7 * 24 * 60;
 /** Failed runs in a row before a routine glows on Routines and Home, and its notification says so. */
 export const ROUTINE_FAILING = 3;
 
+export function isRoutineTimeoutValid(minutes: unknown): minutes is number {
+  return (
+    typeof minutes === "number" &&
+    Number.isInteger(minutes) &&
+    minutes >= MIN_ROUTINE_TIMEOUT_MINUTES &&
+    minutes <= MAX_ROUTINE_TIMEOUT_MINUTES
+  );
+}
+
 /**
- * How many of a routine's latest runs failed in a row, newest first: a start that failed, or a CLI
- * that exited with an error. A run still going is skipped; one that finished, or was stopped, ends it.
+ * A routine's time limit as read from its file. One saved before time limits existed has none
+ * (null) until the person sets one; a value out of range falls back to the default.
  */
-export function failStreak(runs: ReadonlyArray<Pick<RunMeta, "status" | "exitCode">>): number {
+export function normalizeRoutineTimeout(minutes: unknown): number | null {
+  if (minutes === undefined || minutes === null) return null;
+  return isRoutineTimeoutValid(minutes) ? minutes : DEFAULT_ROUTINE_TIMEOUT_MINUTES;
+}
+
+type StreakRun = Pick<RunMeta, "status"> & Partial<Pick<RunMeta, "result" | "origin" | "cutOff">>;
+
+/**
+ * Whether a finished routine run counts as a failure for `failStreak`: it couldn't start, quit
+ * with an error, hit its time limit, or was cut off. Only runs that carry a result count, so runs
+ * from before results were recorded never light a routine up. A question, or one that ended stuck
+ * on a question, is never a failure.
+ */
+export function isRoutineFailure(run: StreakRun): boolean {
+  return run.result === "failed" || run.result === "timeout" || isCutOffRun(run);
+}
+
+/**
+ * How many of a routine's latest runs failed in a row, newest first. A live run is skipped
+ * (unless waiting on a question, which breaks any older streak); anything that isn't a failure
+ * ends it: a clean finish, a question, a manual stop, or a run from before results were recorded.
+ */
+export function failStreak(runs: ReadonlyArray<StreakRun>): number {
   let streak = 0;
   for (const run of runs) {
-    if (run.status === "running") continue;
-    if (run.status === "failed" || (run.status === "exited" && run.exitCode !== null && run.exitCode !== 0)) streak += 1;
+    if (run.status === "running") {
+      if (run.result === "question") break;
+      continue;
+    }
+    if (isRoutineFailure(run)) streak += 1;
     else break;
   }
   return streak;
@@ -34,7 +75,7 @@ export type TickSkipReason =
 export type TickDecision =
   | { action: "fire"; scheduledAt: string }
   | { action: "miss"; scheduledAt: string }
-  | { action: "skip"; reason: TickSkipReason };
+  | { action: "skip"; reason: TickSkipReason; scheduledAt?: string };
 
 export interface RoutineTickInput {
   now: Date;
@@ -45,6 +86,7 @@ export interface RoutineTickInput {
   schedule: Schedule;
   lastFiredAt: string | null;
   previousStillRunning: boolean;
+  previousEndedAt?: string | null;
 }
 
 export type RunNowDecision =
@@ -214,10 +256,15 @@ export function decideRoutineTick(input: RoutineTickInput): TickDecision {
     if (lastSlot && sameWallMinute(lastSlot, slot)) return { action: "skip", reason: "not-due" };
   }
   const scheduledAt = slot.toISOString();
-  if (slot.getTime() < input.appStartedAt.getTime() || input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
+  if (slot.getTime() < input.appStartedAt.getTime()) return { action: "miss", scheduledAt };
+  // A slot that comes while the last run is still open is skipped, and recorded as skipped.
+  if (input.previousStillRunning) return { action: "skip", reason: "still-running", scheduledAt };
+  if (input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
+    // A run that finished after this slot overlapped it while running, so it wasn't missed while closed.
+    const prevEnd = input.previousEndedAt ? Date.parse(input.previousEndedAt) : Number.NaN;
+    if (Number.isFinite(prevEnd) && prevEnd >= slot.getTime()) return { action: "skip", reason: "still-running", scheduledAt };
     return { action: "miss", scheduledAt };
   }
-  if (input.previousStillRunning) return { action: "skip", reason: "still-running" };
   return { action: "fire", scheduledAt };
 }
 
@@ -226,4 +273,118 @@ export function decideRunNow(input: RunNowInput): RunNowDecision {
   if (input.engineAvailable === false) return { ok: false, reason: "engine-missing" };
   if (input.previousStillRunning) return { ok: false, reason: "still-running" };
   return { ok: true };
+}
+
+const CHOICE_OPTION_LINE = /^(?:[-*•]|\d+[.)])\s+\S.*$/;
+/** A line that waits for a person without asking in so many words: "Press Enter", "Waiting for approval…". */
+const PERSON_PROMPT_LINE = /\bpress (?:enter|return|any key|space)\b|\bapprov(?:al|e)\b|\bwaiting for\b|\bawaiting\b|\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]/i;
+/** Frame and prompt marks a TUI draws around its text. */
+const CHROME = /^[\s│┃║╭╮╰╯┌┐└┘├┤─━═❯›>*•·]+|[\s│┃║╭╮╰╯┌┐└┘├┤─━═]+$/g;
+
+function stripCodeAndUrls(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]*`/g, "")
+    .replace(/https?:\/\/\S+/g, "");
+}
+
+function endsWithQuestionMark(line: string): boolean {
+  const cleaned = line.replace(/["'”’)\]*_~`]+$/g, "").trimEnd();
+  return cleaned.endsWith("?") || cleaned.endsWith("？");
+}
+
+/** The lines of `text` with words in them, oldest first; `framed` takes a TUI's frame marks off too. */
+function meaningfulLines(text: string, framed = false): string[] {
+  return text
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => (framed ? line.replace(CHROME, "") : line).trim())
+    .filter((line) => /[\p{L}\p{N}?？]/u.test(line));
+}
+
+/**
+ * Whether a CLI's reply (from its log, or the end of its screen) ends asking the person
+ * something: its last line, past a short list of choices, ends in "?" or waits for a key or an
+ * approval. Fail safe: any question at all counts, "Anything else?" too.
+ */
+export function replyAsks(reply: string | null | undefined): boolean {
+  const lines = meaningfulLines(stripCodeAndUrls(reply ?? "")).map((line) => line.replace(/^>\s?/, ""));
+  if (!lines.length) return false;
+  // A question followed by a short bulleted or numbered list of choices puts the "?" right above the choices.
+  let dropped = 0;
+  while (lines.length > 1 && dropped < 6 && CHOICE_OPTION_LINE.test(lines[lines.length - 1]) && lines[lines.length - 1].length <= 120) {
+    if (endsWithQuestionMark(lines[lines.length - 1])) break;
+    lines.pop();
+    dropped += 1;
+  }
+  const last = lines[lines.length - 1];
+  return endsWithQuestionMark(last) || PERSON_PROMPT_LINE.test(last);
+}
+
+/**
+ * Whether a quiet terminal's screen shows it waiting on a person: a prompt VibeForge knows
+ * (trust, approval, sign-in), a line near the bottom ending in "?" (choices and the CLI's own
+ * frame can sit below it), or "Press Enter" / "Waiting for…" / "approval" in its last lines.
+ */
+export function screenAsks(screen: string | null | undefined): boolean {
+  if (!screen?.trim()) return false;
+  if (detectWaitingPrompt(screen)) return true;
+  const lines = meaningfulLines(screen, true);
+  return lines.slice(-6).some(endsWithQuestionMark) || lines.slice(-3).some((line) => PERSON_PROMPT_LINE.test(line));
+}
+
+/** Whether a reply or screen ends waiting on a person. */
+export function isQuestionForPerson(reply: string | null | undefined, screen?: string | null): boolean {
+  return replyAsks(reply) || Boolean(screen && detectWaitingPrompt(screen));
+}
+
+/**
+ * A closing offer after the work is done ("Want me to also open a PR?", "Anything else?",
+ * "Let me know if…"): the turn finished, and nothing waits on the answer. Only clearly optional
+ * offers; a question about the task itself ("Should I delete them?") still waits.
+ */
+const CLOSING_OFFER = /\b(?:anything else|is there anything else|let me know if|(?:do you )?want me to (?:also|go ahead and also)|would you like me to (?:also|next))\b/i;
+
+/**
+ * Whether a reply from the CLI's log ends on a closing offer rather than a question about the
+ * work. A reply that asked something earlier ("Which branch should I push to? … Let me know if…")
+ * is a question, whatever its last line says.
+ */
+export function endsOnOffer(reply: string | null | undefined): boolean {
+  return closingOffer(reply) === "offer";
+}
+
+/**
+ * How a reply's last line closes: "offer" (an optional offer, nothing asked), "asked" (it closes
+ * with an offer but asked something before it, on that line or an earlier one), or null.
+ */
+function closingOffer(reply: string | null | undefined): "offer" | "asked" | null {
+  const lines = meaningfulLines(stripCodeAndUrls(reply ?? "")).map((line) => line.replace(/^>\s?/, ""));
+  const last = lines[lines.length - 1] ?? "";
+  if (!CLOSING_OFFER.test(last) || PERSON_PROMPT_LINE.test(last)) return null;
+  // Sentences before the offer, on its own line or the same one, that ask something.
+  const before = [...lines.slice(0, -1), last.replace(CLOSING_OFFER, "\u0000").split("\u0000")[0]];
+  return before.some((line) => /[?？]/.test(line)) ? "asked" : "offer";
+}
+
+/**
+ * What a routine turn event from the watcher means. Only the CLI's own log can say a turn
+ * finished; a quiet screen can only mean "question" (it waits for a person) or "working" (keep
+ * watching), never "finished", so a routine is never ended mid-work. A CLI whose log VibeForge
+ * can't read is never ended on its screen at all: it stays open until its time limit, or until it
+ * quits by itself.
+ */
+export function classifyRoutineTurn(input: {
+  reply: string | null;
+  screen?: string | null;
+  fromScreen: boolean;
+  hasLogReader: boolean;
+}): Extract<RoutineRunResult, "finished" | "question"> | "working" {
+  if (input.fromScreen) return screenAsks(input.screen) || replyAsks(input.reply) ? "question" : "working";
+  // The log says the turn ended on a closing offer: the work is done, unless it asked something before it.
+  const offer = closingOffer(input.reply);
+  if (offer === "asked") return "question";
+  if (input.hasLogReader && offer === "offer" && !(input.screen && detectWaitingPrompt(input.screen))) return "finished";
+  if (isQuestionForPerson(input.reply, input.screen)) return "question";
+  return input.hasLogReader ? "finished" : "working";
 }

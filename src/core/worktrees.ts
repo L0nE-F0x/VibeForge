@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MADE_COPY_FOLDERS, seedCopy } from "./copy-setup.js";
 import { runGit, runGitBytes } from "./git.js";
 import { isPathInside } from "./places.js";
 import { isSafeId } from "./slug.js";
+export { diffHeaderTarget, patchFiles } from "../shared/review.js";
+import type { WorkspaceCopySetup } from "./types.js";
 
 /**
  * A task's own copy of its repository: a git worktree on a `vibeforge/<task>` branch, so an agent
@@ -21,6 +24,10 @@ export interface WorkingCopy {
   base: string;
   /** The workspace repository's top folder. */
   repo: string;
+  /** Repo-relative POSIX paths brought in by setup (`dir/` for cloned folders), omitted from leftInCopy. */
+  seeded?: string[];
+  /** Files an earlier Apply of only some files brought in, so the next review starts them unticked. */
+  applied?: AppliedFile[];
 }
 
 export interface ApplyResult {
@@ -45,6 +52,10 @@ export interface ApplyResult {
    * uncommitted edits, or was already up to date.
    */
   pulled?: { branch: string; upstream: string; alreadyUpToDate?: boolean };
+  /** Files left in the copy because they weren't ticked for Apply. */
+  stayed?: number;
+  /** Files left out because an earlier Apply already brought them in, unchanged since. */
+  already?: number;
 }
 
 interface GitRun {
@@ -159,6 +170,20 @@ export function copyBranch(taskId: string): string {
   return `vibeforge/${taskId}`;
 }
 
+/**
+ * Whether `folder` sits in a git repository, by looking for a `.git` in it or a folder above it:
+ * quick, with no git to run, for checking a setting as it's saved. `repoRoot` is the real test.
+ */
+export function insideGitRepo(folder: string): boolean {
+  let dir = path.resolve(folder);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return true;
+    const up = path.dirname(dir);
+    if (up === dir) return false;
+    dir = up;
+  }
+}
+
 /** The repository's top folder, or null when `folder` isn't inside one. */
 export async function repoRoot(folder: string): Promise<string | null> {
   const run = await git(["rev-parse", "--show-toplevel"], folder);
@@ -175,6 +200,36 @@ export async function createCopy(folder: string, target: string, branch: string,
   const repo = await repoRoot(folder);
   if (!repo) throw new Error("A separate copy needs the workspace to be a git repository.");
   return withRepoLock(repo, () => makeCopy(repo, target, branch, previous));
+}
+
+/**
+ * Make a new copy of the workspace repository and apply the workspace's copy setup
+ * (git-ignored files matching workspace patterns + `.worktreeinclude`, and cloned folders).
+ * Shared across tasks, Viby starts, and routines. `record` is called with the copy as soon as
+ * git has made it, before anything is brought in, and again once it holds what was brought in:
+ * a copy is always kept somewhere it can be discarded from. Bringing things in is best effort;
+ * what couldn't be is in `warnings`.
+ */
+export async function prepareCopy(opts: {
+  folder: string;
+  target: string;
+  branch: string;
+  previous?: WorkingCopy | null;
+  copySetup?: WorkspaceCopySetup | null;
+  record?: (copy: WorkingCopy) => void;
+}): Promise<{ copy: WorkingCopy; setupCommand: string | null; warnings: string[] }> {
+  const made = await createCopy(opts.folder, opts.target, opts.branch, opts.previous ?? null);
+  opts.record?.(made);
+  const { seeded, warnings } = await seedCopy({
+    repo: made.repo,
+    folder: opts.folder,
+    copyPath: made.path,
+    copySetup: opts.copySetup,
+  });
+  const copy: WorkingCopy = seeded.length ? { ...made, seeded } : made;
+  if (seeded.length) opts.record?.(copy);
+  const setupCommand = opts.copySetup?.setupCommand?.trim() || null;
+  return { copy, setupCommand, warnings };
 }
 
 async function makeCopy(repo: string, target: string, branch: string, previous: WorkingCopy | null): Promise<WorkingCopy> {
@@ -254,28 +309,58 @@ function samePlace(a: string, b: string): boolean {
  * What builds, installs and the CLIs' own settings make in a folder: never the agent's work, so
  * never a reason to keep a copy around.
  */
-const MADE_FOLDERS = new Set([
-  "node_modules", "vendor", "dist", "dist-electron", "build", "out", "target", "coverage", ".venv", "venv", "__pycache__",
-  ".next", ".nuxt", ".svelte-kit", ".turbo", ".vite", ".cache", ".parcel-cache", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-  ".gradle", ".tox", ".claude", ".codex", ".gemini", ".grok", ".cursor", ".agy", ".antigravity", ".opencode", ".crush", ".kimi",
-  ".muse", ".pi", ".hermes", ".copilot",
-]);
+const MADE_FOLDERS = MADE_COPY_FOLDERS;
 const MADE_FILES = /(?:\.log|\.pyc|\.tsbuildinfo|(?:^|\/)\.DS_Store)$/;
+
+function isMadeEntry(entry: string): boolean {
+  return entry.replace(/\/$/, "").split("/").some((part) => MADE_FOLDERS.has(part)) || MADE_FILES.test(entry);
+}
 
 /**
  * Files the agent left in its copy that git ignores (notes, a `config.local`), leaving out what
- * builds, installs and the CLIs make. A new copy holds tracked files only, so each of these was
- * made in it later, and only lives there: removing the copy would lose them without a word. A
- * folder with nothing but such files in it is named once, as `notes/`.
+ * builds, installs, the CLIs make, and anything copy setup brought in (`copy.seeded`).
  */
 export async function leftInCopy(copy: WorkingCopy): Promise<string[]> {
   const run = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory"], copy.path);
   if (run.code !== 0) return [];
-  return run.stdout
-    .split("\0")
-    .filter(Boolean)
-    .filter((entry) => !entry.replace(/\/$/, "").split("/").some((part) => MADE_FOLDERS.has(part)) && !MADE_FILES.test(entry))
-    .slice(0, 200);
+  const seededFiles = new Set<string>();
+  const seededDirs: string[] = [];
+  for (const item of copy.seeded ?? []) {
+    const clean = item.split(path.sep).join("/").replace(/^\/+/, "");
+    if (!clean) continue;
+    if (clean.endsWith("/")) seededDirs.push(clean);
+    else seededFiles.add(clean);
+  }
+  const inSeededDir = (entry: string) => seededDirs.some((dir) => entry === dir || entry.startsWith(dir));
+  const out: string[] = [];
+  for (const rawEntry of run.stdout.split("\0")) {
+    if (!rawEntry) continue;
+    const entry = rawEntry.split(path.sep).join("/");
+    if (isMadeEntry(entry) || inSeededDir(entry)) continue;
+    if (!entry.endsWith("/")) {
+      if (!seededFiles.has(entry)) out.push(entry);
+      continue;
+    }
+    const hasSeededChild = [...seededFiles].some((file) => file.startsWith(entry));
+    if (!hasSeededChild) {
+      out.push(entry);
+      continue;
+    }
+    const expanded = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", entry.slice(0, -1)], copy.path);
+    if (expanded.code !== 0) {
+      out.push(entry);
+      continue;
+    }
+    for (const rawChild of expanded.stdout.split("\0")) {
+      if (!rawChild) continue;
+      const child = rawChild.split(path.sep).join("/");
+      if (isMadeEntry(child) || inSeededDir(child) || seededFiles.has(child)) continue;
+      out.push(child);
+      if (out.length >= 200) break;
+    }
+    if (out.length >= 200) break;
+  }
+  return out.slice(0, 200);
 }
 
 /** A commit id, never something git could read as an option. */
@@ -333,8 +418,35 @@ export function folderInCopy(copy: WorkingCopy, folder: string): string {
  * binary files included, as one patch against the base commit.
  */
 export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<string> {
+  return (await stageCopy(copy, owner)).patch;
+}
+
+/** One file in a copy's review: the same list, renames paired the same way, that Apply works from. */
+export interface ReviewFile {
+  path: string;
+  /** The name it had before, for a rename. */
+  oldPath: string | null;
+  /** Brought into the workspace by an earlier Apply, and not changed in the copy since. */
+  applied: boolean;
+}
+
+export interface CopyReview {
+  patch: string;
+  files: ReviewFile[];
+}
+
+/** The copy's patch with its list of files, each marked when an earlier Apply already brought it in. */
+export async function copyReview(copy: WorkingCopy, owner: CopyOwner): Promise<CopyReview> {
+  const { patch, tree } = await stageCopy(copy, owner);
+  const entries = await copyEntries(copy.repo, copy.base, tree, "Could not read the copy's changes");
+  const prior = appliedMap(copy.applied);
+  return { patch, files: entries.map((entry) => ({ path: entry.name, oldPath: entry.from, applied: isApplied(entry, prior) })) };
+}
+
+/** Stage the copy into a throwaway index: the tree Apply merges, and the patch read from it. */
+function stageCopy(copy: WorkingCopy, owner: CopyOwner): Promise<{ patch: string; tree: string }> {
   // `git add -A` in a folder that isn't the task's copy would stage someone's real work.
-  if (!ownedCopyPath(owner, copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+  if (!ownedCopyPath(owner, copy.path)?.real) return Promise.reject(new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone."));
   return withRepoLock(copy.repo, async () => {
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-patch-"));
     const tempIndex = path.join(scratch, "index");
@@ -353,18 +465,94 @@ export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<st
       const env = { GIT_INDEX_FILE: tempIndex };
       const staged = await git(["add", "-A"], copy.path, { env });
       if (staged.code !== 0) throw stagingFailure(staged);
+      // What copy setup brought in (a .env) is never part of the copy's changes, even if the agent
+      // changed .gitignore there so git no longer ignores it.
+      const seeded = (copy.seeded ?? []).map((item) => item.replace(/\/+$/, "")).filter(Boolean);
+      if (seeded.length) {
+        const unstaged = await git(["rm", "-r", "--cached", "--ignore-unmatch", "--quiet", "--", ...seeded], copy.path, { env });
+        if (unstaged.code !== 0) throw stagingFailure(unstaged);
+      }
       // The staged tree is what Apply merges: the patch below is text, and text in some other
       // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
       const tree = await git(["write-tree"], copy.path, { env });
       if (tree.code !== 0) throw failure("Could not read the copy's changes", tree);
-      const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path, { env });
+      const treeId = tree.stdout.trim();
+      // diff-tree, as Apply's own list is: plumbing pairs renames with -M whatever diff.renames
+      // says in the person's git config, so the review shows the same files Apply picks from.
+      const diff = await git(["diff-tree", "-r", "-p", "--binary", "-M", "--no-color", "--no-ext-diff", "--no-textconv", copy.base, treeId], copy.path);
       if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
-      stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: tree.stdout.trim() });
-      return diff.stdout;
+      stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: treeId });
+      return { patch: diff.stdout, tree: treeId };
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });
     }
   });
+}
+
+/** A change between the copy's base and its tree: one file, or a rename's two sides. */
+interface CopyEntry {
+  /** The file's name now (a rename's new name). */
+  name: string;
+  /** A rename's old name. */
+  from: string | null;
+  /** Every name the change writes or removes in the workspace. */
+  paths: string[];
+  /** The file's content id in the copy, or "-" when the copy deleted it. */
+  id: string;
+}
+
+/** What the copy changed, with renames paired by git's own detection (-M), as Apply and the review both use. */
+async function copyEntries(repo: string, base: string, tree: string, what: string): Promise<CopyEntry[]> {
+  const run = await git(["diff-tree", "-r", "-z", "-M", base, tree], repo);
+  if (run.code !== 0) throw failure(what, run);
+  const parts = run.stdout.split("\0");
+  const entries: CopyEntry[] = [];
+  for (let at = 0; at + 1 < parts.length; ) {
+    const head = /^:\d{6} \d{6} [0-9a-f]+ ([0-9a-f]+) ([A-Z])/.exec(parts[at]);
+    if (!head) break;
+    const id = ZERO_OID.test(head[1]) ? GONE : head[1];
+    if ((head[2] === "R" || head[2] === "C") && at + 2 < parts.length) {
+      const [from, to] = [parts[at + 1], parts[at + 2]];
+      entries.push(head[2] === "R" ? { name: to, from, paths: [from, to], id } : { name: to, from: null, paths: [to], id });
+      at += 3;
+    } else {
+      entries.push({ name: parts[at + 1], from: null, paths: [parts[at + 1]], id });
+      at += 2;
+    }
+  }
+  return entries;
+}
+
+/** How a copy remembers a path it no longer has, in its record of what was applied. */
+const GONE = "-";
+
+/** A file an earlier Apply brought in, with its content id in the copy at the time ("-" for gone). */
+export interface AppliedFile {
+  path: string;
+  id: string;
+}
+
+/** A saved record of applied files, read from a file anyone can edit: anything else is dropped. */
+export function appliedFiles(value: unknown): AppliedFile[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const file = item as Partial<AppliedFile> | null;
+    return file && typeof file.path === "string" && file.path && typeof file.id === "string" && /^(?:[0-9a-f]{7,64}|-)$/.test(file.id) ? [{ path: file.path, id: file.id }] : [];
+  });
+}
+
+function appliedMap(applied: readonly AppliedFile[] | undefined): Map<string, string> {
+  return new Map((applied ?? []).map((file) => [file.path, file.id]));
+}
+
+/** What each of a change's names holds in the copy now: a rename's old name is gone. */
+function entryIds(entry: CopyEntry): AppliedFile[] {
+  return entry.paths.map((name) => ({ path: name, id: name === entry.from ? GONE : entry.id }));
+}
+
+/** Applied before, and the copy hasn't changed it since. */
+function isApplied(entry: CopyEntry, prior: Map<string, string>): boolean {
+  return entryIds(entry).every((file) => prior.get(file.path) === file.id);
 }
 
 /**
@@ -391,71 +579,6 @@ function stagingFailure(run: GitRun): Error {
   return failure("Could not read the copy's changes", run);
 }
 
-function unquoteGitPath(raw: string): string {
-  if (!raw.startsWith('"') || !raw.endsWith('"')) return raw;
-  const inner = raw.slice(1, -1);
-  const bytes: number[] = [];
-  const escaped: Record<string, string> = { t: "\t", n: "\n", r: "\r", '"': '"', "\\": "\\" };
-  for (let i = 0; i < inner.length; i += 1) {
-    if (inner[i] !== "\\" || i + 1 >= inner.length) {
-      bytes.push(...Buffer.from(inner[i], "utf8"));
-      continue;
-    }
-    const oct = /^[0-7]{3}/.exec(inner.slice(i + 1, i + 4));
-    if (oct) {
-      bytes.push(Number.parseInt(oct[0], 8));
-      i += 3;
-      continue;
-    }
-    i += 1;
-    bytes.push(...Buffer.from(escaped[inner[i]] ?? inner[i], "utf8"));
-  }
-  return Buffer.from(bytes).toString("utf8");
-}
-
-export function diffHeaderTarget(line: string): string | null {
-  if (!line.startsWith("diff --git ")) return null;
-  const rest = line.slice("diff --git ".length);
-  if (rest.startsWith('"')) {
-    const tokens: string[] = [];
-    for (let i = 0; i < rest.length && tokens.length < 2; ) {
-      if (rest[i] === " ") {
-        i += 1;
-        continue;
-      }
-      if (rest[i] === '"') {
-        let j = i + 1;
-        while (j < rest.length && rest[j] !== '"') j += rest[j] === "\\" ? 2 : 1;
-        tokens.push(unquoteGitPath(rest.slice(i, j + 1)));
-        i = j + 1;
-      } else {
-        const end = rest.indexOf(" ", i);
-        tokens.push(rest.slice(i, end < 0 ? rest.length : end));
-        i = end < 0 ? rest.length : end;
-      }
-    }
-    return tokens.length === 2 && tokens[1].startsWith("b/") ? tokens[1].slice(2) : null;
-  }
-  let pos = rest.indexOf(" b/");
-  let fallback: string | null = null;
-  while (pos >= 0 && rest.startsWith("a/")) {
-    if (rest.slice(2, pos) === rest.slice(pos + 3)) return rest.slice(pos + 3);
-    fallback = rest.slice(pos + 3);
-    pos = rest.indexOf(" b/", pos + 1);
-  }
-  return fallback;
-}
-
-/** The files a patch touches, from its `diff --git` headers (handling `" b/"` and C-quoted names). */
-export function patchFiles(patch: string): string[] {
-  const files = new Set<string>();
-  for (const line of patch.split("\n")) {
-    const file = diffHeaderTarget(line);
-    if (file) files.add(file);
-  }
-  return [...files];
-}
-
 /**
  * Apply a copy's changes to the workspace as uncommitted edits. Each file is merged three ways, as
  * `git merge` would: the copy's version, the workspace's as it is on disk now (edits not yet
@@ -463,16 +586,49 @@ export function patchFiles(patch: string): string[] {
  * in; the same lines changed on both sides are left with conflict markers to resolve. Git's own
  * index is never touched, and nothing is committed. Throws when the changes can't go in at all.
  */
-export function applyToWorkspace(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
+export async function applyToWorkspace(copy: WorkingCopy, patch: string, options: ApplyOptions = {}): Promise<ApplyResult> {
+  return (await applyCopyFiles(copy, patch, options)).result;
+}
+
+export interface ApplyOptions {
+  /**
+   * Files left unticked in the review, never touched: a rename goes in only with both its names
+   * ticked, and Apply refuses when just one is. Without it, files an earlier Apply brought in
+   * (unchanged since) are left out and everything else goes in.
+   */
+  skip?: readonly string[];
+  /** Only work out what would go in and what would stay; nothing is written. */
+  dryRun?: boolean;
+}
+
+/**
+ * applyToWorkspace, and the copy's record of what is now in the workspace (see WorkingCopy.applied),
+ * for a copy that stays after this Apply.
+ */
+export function applyCopyFiles(copy: WorkingCopy, patch: string, options: ApplyOptions = {}): Promise<{ result: ApplyResult; applied: AppliedFile[] }> {
   return withRepoLock(copy.repo, async () => {
     const key = path.resolve(copy.path);
     const staged = stagedTrees.get(key);
     try {
-      return await applyPatch(copy, patch, staged?.patch === patch ? staged.tree : null);
+      return await applyPatch(copy, patch, staged?.patch === patch ? staged.tree : null, options);
     } finally {
-      if (stagedTrees.get(key) === staged) stagedTrees.delete(key);
+      if (!options.dryRun && stagedTrees.get(key) === staged) stagedTrees.delete(key);
     }
   });
+}
+
+/** The changes Apply leaves out: the unticked ones, else those already applied. A half-ticked rename is refused. */
+function leftOut(entries: CopyEntry[], skip: readonly string[] | undefined, prior: Map<string, string>): Set<CopyEntry> {
+  if (!skip) return new Set(entries.filter((entry) => isApplied(entry, prior)));
+  const names = new Set(skip);
+  const out = new Set<CopyEntry>();
+  for (const entry of entries) {
+    const unticked = entry.paths.filter((name) => names.has(name)).length;
+    if (!unticked) continue;
+    if (unticked < entry.paths.length) throw new Error(`${entry.from} was renamed to ${entry.name} in the copy. Tick or untick both together, then Apply again.`);
+    out.add(entry);
+  }
+  return out;
 }
 
 const ZERO_OID = /^0+$/;
@@ -485,8 +641,9 @@ const MERGE_AUTHOR = {
   GIT_COMMITTER_EMAIL: "vibeforge@localhost",
 };
 
-async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string | null): Promise<ApplyResult> {
-  if (!patch.trim()) return { files: [], conflicts: [], kept: [] };
+async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string | null, options: ApplyOptions): Promise<{ result: ApplyResult; applied: AppliedFile[] }> {
+  const prior = appliedMap(copy.applied);
+  if (!patch.trim()) return { result: { files: [], conflicts: [], kept: [] }, applied: [] };
   if (!isCommitId(copy.base)) throw new Error("The changes don't apply to the workspace");
   const repo = copy.repo;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-apply-"));
@@ -505,22 +662,30 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
       await step(["apply", "--cached", "--whitespace=nowarn", "-"], theirsIndex, patch);
       theirs = (await step(["write-tree"], theirsIndex)).trim();
     }
+    const entries = await copyEntries(repo, copy.base, theirs, "The changes don't apply to the workspace");
+    const skipped = leftOut(entries, options.skip, prior);
+    const chosen = entries.filter((entry) => !skipped.has(entry));
+    const stayed = [...skipped].filter((entry) => !isApplied(entry, prior)).length;
+    const already = skipped.size - stayed;
+    const files = chosen.map((entry) => entry.name);
+    const counts = { ...(stayed ? { stayed } : {}), ...(already ? { already } : {}) };
+    // What the copy's record holds once `brought` are in the workspace.
+    const record = (brought: CopyEntry[]): AppliedFile[] => {
+      const next = new Map(prior);
+      for (const entry of brought) for (const file of entryIds(entry)) next.set(file.path, file.id);
+      return [...next].map(([name, id]) => ({ path: name, id }));
+    };
+    if (options.dryRun) return { result: { files, conflicts: [], kept: [], ...counts }, applied: [] };
+    if (!chosen.length) return { result: { files: [], conflicts: [], kept: [], ...counts }, applied: record([]) };
+    // Only the ticked files' names are written; everything else in the workspace is left alone.
+    const allowed = skipped.size ? new Set(chosen.flatMap((entry) => entry.paths)) : null;
     const touched = (await step(["diff-tree", "-r", "-z", "--no-renames", "--name-only", copy.base, theirs])).split("\0").filter(Boolean);
-    const statusParts = (await step(["diff-tree", "-r", "-z", "-M", "--name-status", copy.base, theirs])).split("\0");
-    const files: string[] = [];
-    for (let i = 0; i + 1 < statusParts.length && statusParts[i]; i += 2) {
-      if (/^[RC]/.test(statusParts[i]) && i + 2 < statusParts.length) {
-        files.push(statusParts[i + 2]);
-        i += 1;
-      } else {
-        files.push(statusParts[i + 1]);
-      }
-    }
     const theirsCommit = (await step(["commit-tree", "--no-gpg-sign", "-p", copy.base, "-m", copy.branch, theirs])).trim();
     // If the copy's commits are already merged on the workspace's branch or its upstream (a PR
     // merged on GitHub), fast-forward instead of pasting the same edits back as uncommitted files.
-    const pulled = await tryPullMerged(copy, theirs, theirsCommit);
-    if (pulled) return { files, conflicts: [], kept: [], pulled };
+    // Never when something is left out: that would pull the unticked files in too.
+    const pulled = allowed ? null : await tryPullMerged(copy, theirs, theirsCommit);
+    if (pulled) return { result: { files, conflicts: [], kept: [], pulled }, applied: record(chosen) };
     // The workspace's side: git's index copied, then brought up to what is on disk now.
     const oursIndex = path.join(scratch, "ours");
     try {
@@ -536,6 +701,7 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
     await step(["add", "-u"], oursIndex);
     // Untracked files where the copy has changes are part of it too, ignored ones included.
     const untracked = touched.filter((name) => {
+      if (allowed && !allowed.has(name)) return false;
       const at = placeIn(repo, name);
       const stat = at ? lstat(at) : null;
       return Boolean(stat && (stat.isFile() || stat.isSymbolicLink()));
@@ -549,22 +715,27 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
     const merged = await git(["merge-tree", "--write-tree", "-z", oursCommit, theirsCommit], repo);
     if (merged.code !== 0 && merged.code !== 1) throw failure("The changes don't apply to the workspace", merged);
     const [result, ...info] = merged.stdout.split("\0");
+    const labels = { ours: oursCommit, theirs: theirsCommit, base: copy.base, branch: copy.branch };
+    const isAllowed = (name: string) => !allowed || allowed.has(name) || allowed.has(plainName(name, labels));
     // Per conflicted path, the workspace's (stage 2) and the copy's (stage 3) version.
     const stages = new Map<string, { ours?: string; theirs?: string }>();
     for (const line of info) {
       const entry = /^\d{6} ([0-9a-f]+) ([123])\t(.+)$/s.exec(line);
       if (!entry) break;
+      if (!isAllowed(entry[3])) continue;
       const sides = stages.get(entry[3]) ?? {};
       if (entry[2] === "2") sides.ours = entry[1];
       if (entry[2] === "3") sides.theirs = entry[1];
       stages.set(entry[3], sides);
     }
-    const changes = await treeChanges(repo, ours, result);
-    const labels = { ours: oursCommit, theirs: theirsCommit, base: copy.base, branch: copy.branch };
+    const changes = (await treeChanges(repo, ours, result)).filter((change) => isAllowed(change.path));
     const failed = new Set(await writeChanges(repo, changes, stages, labels));
     const marked = new Set(changes.filter((change) => withMarkers(change, stages) && !failed.has(change.path)).map((change) => change.path));
     const conflicts = unique([...stages.keys(), ...failed].map((name) => plainName(name, labels)));
-    return { files, conflicts, kept: conflicts.filter((name) => !marked.has(name)) };
+    const kept = conflicts.filter((name) => !marked.has(name));
+    // A file kept as the workspace had it didn't come in: it isn't recorded as applied.
+    const keptSet = new Set(kept);
+    return { result: { files, conflicts, kept, ...counts }, applied: record(chosen.filter((entry) => !entry.paths.some((name) => keptSet.has(name)))) };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }

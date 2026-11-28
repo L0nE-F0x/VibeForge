@@ -92,6 +92,28 @@ describe("attention", () => {
     expect(track([chat(false)], look([], null, "c1"))).toEqual([]);
   });
 
+  it("marks a routine waiting only when stopped on a question, not on normal turn completion", () => {
+    const routine = (patch: Partial<LiveSession> = {}) =>
+      session("r-1", "", { kind: "run", origin: "routine", routineId: "daily", runId: "run-1", title: "Daily", ...patch });
+    // Normal work -> quiet does not prematurely flag waiting or emit done on exit.
+    expect(track([routine({ working: true })], null)).toEqual([]);
+    expect(track([routine({ working: false })], null)).toEqual([]);
+    expect(track([], null)).toEqual([]);
+
+    // Stopped on a question raises a single waiting mark, cleared once answered or ended.
+    expect(track([routine({ working: false })], null)).toEqual([]);
+    expect(names(track([routine({ working: false, needsInput: true })], null))).toEqual(["r-1:waiting"]);
+    expect(track([routine({ working: false, needsInput: false })], null)).toEqual([]);
+  });
+
+  it("marks a routine sitting still on a first screen it doesn't know, once", () => {
+    const first = [session("r-2", "", { kind: "run", origin: "routine", routineId: "nightly", runId: "run-2", title: "Nightly" })];
+    expect(track(first, null)).toEqual([]);
+    now += FIRST_SCREEN_MS;
+    expect(names(track(first, null))).toEqual(["r-2:waiting"]);
+    expect(track(first, null)).toEqual([]);
+  });
+
   it("opens each waiter where it waits", () => {
     const base = { ptyId: "p", attention: "waiting" as const, label: "x", agentId: null, chatId: null, taskId: null, routineId: null, runId: "r1", since: 0 };
     expect(routeForMark({ ...base, origin: "task", taskId: "fix", workspaceId: "ws" }, true)).toEqual({ view: "tasks", taskId: "fix" });

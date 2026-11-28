@@ -20,7 +20,8 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import type { RunStatus, UnreadableFile } from "../../shared/api.js";
+import type { CutOff, RoutineRunResult, RunOrigin, RunStatus, UnreadableFile } from "../../shared/api.js";
+import { isCutOffRun } from "../../shared/routine-result.js";
 import { identicon, mark, shade } from "../../shared/pixel.js";
 import { initials, shortAgo, timeAgo } from "../../shared/text.js";
 import { call, retryFailedLoads, useLoadFailures, useNow, useUnreadableFiles } from "../api.js";
@@ -280,10 +281,27 @@ export const STATUS_KEY: Record<RunStatus, Key> = {
   failed: "status.failed",
 };
 
-export function StatusChip({ status, exitCode }: { status: RunStatus; exitCode?: number | null }) {
+export function StatusChip({
+  status,
+  exitCode,
+  result,
+  origin,
+  cutOff,
+}: {
+  status: RunStatus;
+  exitCode?: number | null;
+  result?: RoutineRunResult | null;
+  origin?: RunOrigin | null;
+  cutOff?: CutOff | null;
+}) {
   const t = useT();
+  if (status === "running" && result === "question") return <Chip tone="warn">{t("status.question")}</Chip>;
   if (status === "running") return <Chip tone="accent">{t("status.running")}</Chip>;
-  if (status === "failed") return <Chip tone="bad">{t("status.failed")}</Chip>;
+  if (result === "timeout") return <Chip tone="bad">{t("status.timeout")}</Chip>;
+  if (result === "stuck") return <Chip tone="warn">{t("status.stuck")}</Chip>;
+  if (result === "limit") return <Chip tone="ok">{t("status.limit")}</Chip>;
+  if (isCutOffRun({ status, result, origin, cutOff })) return <Chip tone="bad">{t("status.cutoff")}</Chip>;
+  if (status === "failed" || (result === "failed" && !exitCode)) return <Chip tone="bad">{t("status.failed")}</Chip>;
   if (status === "stopped") return <Chip tone="warn">{t("status.stopped")}</Chip>;
   if (exitCode && exitCode !== 0) return <Chip tone="bad">{t("status.exit", { code: exitCode })}</Chip>;
   return <Chip tone="ok">{t("status.exited")}</Chip>;
@@ -514,6 +532,8 @@ export interface MenuItem {
   label: ReactNode;
   icon?: LucideIcon;
   hint?: ReactNode;
+  /** Secondary line under `label`, used e.g. to explain why a disabled item is unavailable. */
+  note?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
   /** Stands out in the accent colour, for the one thing worth noticing (an available update). */
@@ -666,7 +686,14 @@ export function Menu({ items, onClose }: { items: MenuEntry[]; onClose: () => vo
           >
             {item.checked !== undefined && (item.checked ? <Check size={14} className="accent-text" /> : <span style={{ width: 14, flex: "none" }} />)}
             {item.icon && <item.icon size={14} />}
-            <span className="grow truncate">{item.label}</span>
+            {item.note !== undefined ? (
+              <span className="grow vstack" style={{ gap: 2 }}>
+                <span className="truncate">{item.label}</span>
+                <span className="menu-note">{item.note}</span>
+              </span>
+            ) : (
+              <span className="grow truncate">{item.label}</span>
+            )}
             {item.hint !== undefined && <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>{item.hint}</span>}
           </button>
         ),

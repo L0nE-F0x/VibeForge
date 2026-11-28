@@ -6,10 +6,10 @@ import { RUN_FILES } from "../runs.js";
 import { isDirectory } from "../fsx.js";
 import { taskPrompt } from "../preamble.js";
 import { createTask, markStopped, requestExecute } from "../tasks.js";
-import type { Task, TaskStatus, Workspace } from "../types.js";
+import type { Task, TaskStatus, Workspace, WorkspaceCopySetup } from "../types.js";
 import { isSafeId } from "../slug.js";
 import type { Bin } from "../trash.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
+import { applyCopyFiles, copyBranch, copyPatch, copyReview, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type CopyReview, type WorkingCopy } from "../worktrees.js";
 import { BLOCKER_TEXT, type Deleted, type Launched, type Queued, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { FolderTurns } from "./turns.js";
@@ -211,7 +211,7 @@ export class TaskDesk {
     const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const prompt = taskPrompt(task.title, task.body);
     const previous = task.runIds[task.runIds.length - 1] ? this.core.store.getRun(task.runIds[task.runIds.length - 1]) : null;
-    const cwd = task.isolated ? await this.copyFor(task, workspace) : workspace.path;
+    const { cwd, setupCommand, warnings } = task.isolated ? await this.copyFor(task, workspace) : { cwd: workspace.path, setupCommand: null, warnings: [] };
     const resume = continueSession ? this.core.resumePlan(engine, previous, cwd) : { native: false, resumeArgs: null };
     const canContinue = resume.native;
     const prior = continueSession && previous && !canContinue ? this.core.transcriptPath(previous) : null;
@@ -220,6 +220,8 @@ export class TaskDesk {
       title: task.title,
       engine,
       cwd,
+      setupCommand,
+      setupNotes: warnings,
       prompt,
       promptText: canContinue ? null : this.core.preambleFor(agent, followUp ? `${prompt}\n\n${followUp}` : prompt, prior, task.isolated ? { path: cwd, of: workspace.path } : null),
       pasteAfter: canContinue ? followUp : null,
@@ -297,41 +299,93 @@ export class TaskDesk {
     return this.taskView(task);
   }
 
-  /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
-  private async copyFor(task: Task, workspace: Workspace): Promise<string> {
-    if (task.copy && isDirectory(task.copy.path)) {
-      if (!ownedCopyPath(this.owner(task.id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
-      if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
-      return folderInCopy(task.copy, workspace.path);
+  /**
+   * The folder an isolated task or routine runs in: its own copy of `folder` under
+   * `<dataRoot>/worktrees/<ownerId>`. Reused by both tasks and isolated routines so copy creation
+   * goes through one shared path. A new copy is handed to `record` as soon as git has made it, so
+   * the owner keeps it even if bringing files in goes wrong.
+   */
+  async ensureCopy(
+    ownerId: string,
+    folder: string,
+    previous: WorkingCopy | null,
+    untrustedError: string,
+    otherRepoError: string,
+    /** The workspace's "when a copy is made" setting: files brought along, folders cloned, a setup command. */
+    copySetup?: WorkspaceCopySetup | null,
+    record?: (copy: WorkingCopy) => void,
+  ): Promise<{ copy: WorkingCopy; cwd: string; created: boolean; setupCommand: string | null; warnings: string[] }> {
+    const owner = this.owner(ownerId);
+    if (previous && isDirectory(previous.path)) {
+      if (!ownedCopyPath(owner, previous.path)?.real) throw new Error(untrustedError);
+      const repo = await repoRoot(folder);
+      if (!repo || repo !== path.resolve(previous.repo)) throw new Error(otherRepoError);
+      return { copy: previous, cwd: folderInCopy(previous, folder), created: false, setupCommand: null, warnings: [] };
     }
-    if (!isSafeId(task.id)) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+    if (!isSafeId(ownerId)) throw new Error(untrustedError);
     // A copy whose folder went (deleted by hand, say) picks its branch's commits back up.
-    const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id), task.copy);
-    const current = this.core.store.getTask(task.id) ?? task;
-    this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
-    return folderInCopy(copy, workspace.path);
+    const { copy, setupCommand, warnings } = await prepareCopy({
+      folder,
+      target: path.join(this.core.options.dataRoot, "worktrees", ownerId),
+      branch: copyBranch(ownerId),
+      previous,
+      copySetup,
+      record,
+    });
+    for (const warning of warnings) this.core.options.host.logWarn?.(`copy setup: ${warning}`);
+    return { copy, cwd: folderInCopy(copy, folder), created: true, setupCommand, warnings };
+  }
+
+  /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
+  private async copyFor(task: Task, workspace: Workspace): Promise<{ cwd: string; setupCommand: string | null; warnings: string[] }> {
+    const { cwd, setupCommand, warnings } = await this.ensureCopy(
+      task.id,
+      workspace.path,
+      task.copy,
+      "This task's copy is not in VibeForge's worktrees folder, so it was left alone.",
+      "This task's copy names another repository, so it was left alone.",
+      workspace.copySetup,
+      (copy) => {
+        const current = this.core.store.getTask(task.id) ?? task;
+        this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
+      },
+    );
+    return { cwd, setupCommand, warnings };
+  }
+
+  /** Everything the task's separate copy changed since it started, as a patch, with its list of files. */
+  async copyDiff(id: string): Promise<CopyReview> {
+    const task = this.core.store.getTask(id);
+    if (!task) throw new Error("That task no longer exists.");
+    if (!task.copy) throw new Error("This task has no separate copy.");
+    if (!ownedCopyPath(this.owner(id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+    if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
+    return copyReview(task.copy, this.owner(id));
   }
 
   /**
-   * Bring a task copy's changes into the workspace as uncommitted edits. A clean apply removes the
-   * copy and marks the task done, and so does a copy with nothing to apply; with conflicts the copy
-   * stays until they're sorted out.
+   * Bring a task copy's changes into the workspace as uncommitted edits, leaving out the files in
+   * `skip` (those unticked in the review). A clean apply removes the copy and marks the task done,
+   * and so does a copy with nothing to apply; with conflicts, or files left unticked, the copy stays
+   * and remembers what was applied, so the next review starts those unticked.
    */
-  async applyCopy(id: string): Promise<ApplyResult> {
+  async applyCopy(id: string, skip?: readonly string[]): Promise<ApplyResult> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (!task.copy) throw new Error("This task has no separate copy.");
     if (this.taskLive(task)) throw new Error("Stop the task before applying its changes.");
     if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
     const patch = await copyPatch(task.copy, this.owner(id));
-    const result = await applyToWorkspace(task.copy, patch);
-    // Files git ignores that only live in the copy keep it, as conflicts do, until it is discarded.
-    const left = result.conflicts.length ? [] : await leftInCopy(task.copy);
+    const { result, applied } = await applyCopyFiles(task.copy, patch, { skip });
+    // Files left unticked keep the copy, as conflicts and files git ignores do, until it is discarded.
+    const left = result.conflicts.length || result.stayed ? [] : await leftInCopy(task.copy);
     if (left.length) result.left = { folder: task.copy.path, files: left };
-    if (!result.conflicts.length && !left.length) {
+    const current = this.core.store.getTask(id) ?? task;
+    if (!result.conflicts.length && !result.stayed && !left.length) {
       await removeCopy(task.copy, this.owner(id));
-      const current = this.core.store.getTask(id) ?? task;
       this.core.store.writeTask({ ...current, copy: null, status: "done", updatedAt: this.core.now().toISOString() });
+    } else if (current.copy && path.resolve(current.copy.path) === path.resolve(task.copy.path)) {
+      this.core.store.writeTask({ ...current, copy: { ...current.copy, applied }, updatedAt: this.core.now().toISOString() });
     }
     this.core.emit("tasks");
     if (result.pulled) this.core.emit("workspaces");

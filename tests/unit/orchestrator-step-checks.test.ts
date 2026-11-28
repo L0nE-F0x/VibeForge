@@ -49,6 +49,9 @@ describe("stepIssue for Viby's app-control steps", () => {
     expect(issue({ kind: "workspace", action: "move", target: "ws1" })).toBe("prompt");
     expect(issue({ kind: "workspace", action: "move", target: "ws1", status: "sideways" })).toBe("prompt");
     expect(issue({ kind: "workspace", action: "remove", target: "ws1" })).toBeNull();
+    expect(issue({ kind: "workspace", action: "copy-setup", target: "ws1" })).toBe("prompt");
+    expect(issue({ kind: "workspace", action: "copy-setup", target: "ws1", options: "folders=node_modules" })).toBeNull();
+    expect(issue({ kind: "workspace", action: "copy-setup", target: "ws1", prompt: "npm i" })).toBeNull();
   });
 
   it("checks entity inspections and what an inspect target names", () => {

@@ -322,3 +322,24 @@ describe("Go on a plan card from the phone", () => {
     expect(page.state).toMatchObject({ busy: false, actionError: "That plan has already been carried out." });
   });
 });
+
+describe("a copy-setup step on the phone's plan card", () => {
+  it("shows the setup command and the files and folders it changes", () => {
+    const script = [
+      `const words = { "orch.copyFiles": "Files", "orch.copyFolders": "Folders", "orch.copyCommand": "Command", "orch.copyNone": "none", "orch.copyFilesDefault": "default", "orch.copyRemoved": "removed", "orch.copyInclude": ".worktreeinclude", "orch.copyIncludeOn": "used", "orch.copyIncludeOff": "not used" };`,
+      `const t = (key) => words[key] || key;`,
+      `const el = (tag, attrs, ...children) => "<" + tag + (attrs && attrs.class ? " " + attrs.class : "") + ">" + children.flat().join("") + "</" + tag + ">";`,
+      pick("plan-card.js", "copySetupLines"),
+      `globalThis.lines = copySetupLines;`,
+    ].join("\n");
+    const context = vm.createContext({});
+    vm.runInContext(script, context);
+    const lines = context.lines as (change: Record<string, unknown>, withCommand: boolean) => string;
+    const shown = lines({ files: ["*.pem"], folders: [], command: "curl x | sh" }, true);
+    expect(shown).toContain("<dt>Files</dt><dd mono>*.pem</dd>");
+    expect(shown).toContain("<dt>Folders</dt><dd>none</dd>");
+    expect(shown).toContain("<dt>Command</dt><dd mono>curl x | sh</dd>");
+    // While the plan can be changed, the command is in the box below instead.
+    expect(lines({ command: "curl x | sh" }, false)).toBe("<dl orch-copy-setup></dl>");
+  });
+});

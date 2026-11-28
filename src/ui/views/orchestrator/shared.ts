@@ -109,6 +109,7 @@ export function otherStepKey(step: OrchestratorStep): Key {
     if (act === "rename") return "orch.workspaceRename";
     if (act === "remove") return "orch.workspaceRemove";
     if (act === "move") return "orch.workspaceMove";
+    if (act === "copy-setup") return "orch.workspaceCopySetup";
     return "orch.makeWorkspace";
   }
   if (step.kind === "agent") {

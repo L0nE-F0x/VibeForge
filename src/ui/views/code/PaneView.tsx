@@ -47,6 +47,10 @@ export interface PaneActions {
   newReviewer: (workspace: Workspace, pane: PaneNode, engineId: string) => Promise<string | null>;
   /** The person typed into a fresh shell, or started a CLI from its hint: the hint goes. */
   typed: (paneId: string) => void;
+  /** Reopen, in this pane's shell, the session a close cut off here. */
+  reopen: (workspace: Workspace, pane: PaneNode) => void;
+  /** Stop offering that session. */
+  letGo: (paneId: string) => void;
 }
 
 interface PaneProps {
@@ -132,6 +136,9 @@ export const PaneView = memo(function PaneView({
   const onStart = (launch: PaneLaunch, continueSession?: boolean) => actions.start(workspace, pane, launch, continueSession);
   const onClose = () => actions.close(workspace, pane);
   const onZoom = () => actions.zoom(workspace, pane);
+  // The CLI VibeForge's last close cut off here, while picking it back up is offered.
+  const cutOff = runtime?.cutOff ?? null;
+  const cutOffLabel = cutOff ? (engines.find((item) => item.id === cutOff.engine)?.label ?? cutOff.engine) : "";
   // A CLI is being recorded while it runs: one this pane started, or one typed into its shell.
   const recording = state === "live" && Boolean(runId) && (pane.launch.type === "engine" || Boolean(program));
   const hint = showShellHint({ shell: pane.launch.type === "shell", fresh: Boolean(runtime?.fresh), live: state === "live", program });
@@ -245,7 +252,16 @@ export const PaneView = memo(function PaneView({
       )}
       {runtime?.ptyId && state !== "idle" ? (
         <>
-          {hint && (
+          {cutOff && state === "live" && !program && (
+            <div className="pane-hint">
+              <span className="pane-hint-text">{t("pane.cutOff", { title: cutOffLabel })}</span>
+              <Button size="sm" variant="primary" icon={RotateCcw} tip={cutOff.exact ? t("pane.cutOffExact") : t("pane.cutOffLatest")} onClick={() => actions.reopen(workspace, pane)}>
+                {t("pane.continueSession")}
+              </Button>
+              <Button size="sm" variant="ghost" icon={X} tip={t("pane.cutOffLetGo")} onClick={() => actions.letGo(pane.id)} />
+            </div>
+          )}
+          {hint && !cutOff && (
             <div className="pane-hint">
               <span className="pane-hint-text">{found.length ? t("first.hint.pick") : t("first.hint.none")}</span>
               {found.map((item) => (
@@ -299,12 +315,18 @@ export const PaneView = memo(function PaneView({
           ) : pane.launch.type === "engine" ? (
             <>
               <span>
-                {t("pane.lastTime", { title })}
+                {cutOff ? t("pane.cutOff", { title }) : t("pane.lastTime", { title })}
                 {engine && !engine.available ? ` ${t("pane.notOnPath")}` : ""}
               </span>
               <div className="launchers">
-                {engine?.continueArgs?.length ? (
-                  <Button variant="primary" icon={RotateCcw} disabled={!engine?.available} onClick={() => onStart(pane.launch, true)}>
+                {engine?.continueArgs?.length || cutOff?.exact ? (
+                  <Button
+                    variant="primary"
+                    icon={RotateCcw}
+                    disabled={!engine?.available}
+                    tip={cutOff ? (cutOff.exact ? t("pane.cutOffExact") : t("pane.cutOffLatest")) : undefined}
+                    onClick={() => onStart(pane.launch, true)}
+                  >
                     {t("pane.continueSession")}
                   </Button>
                 ) : null}

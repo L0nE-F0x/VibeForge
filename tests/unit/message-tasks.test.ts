@@ -84,6 +84,27 @@ describe("handed-out tasks", () => {
     ctx.svc.close();
   });
 
+  it("lets a lead apply a task it handed out before a restart, once its session is continued", async () => {
+    const { repo, ctx, workspace, sender, goAhead } = await team();
+    goAhead({ leadApplies: true });
+    expect(await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: "Add e.txt" })).toMatchObject({ ok: true, started: true });
+    fs.writeFileSync(path.join(ctx.spawns.at(-1)!.cwd, "e.txt"), "new\n");
+    const leadRun = ctx.svc.listLive().find((item) => item.ptyId === sender)!.runId!;
+    ctx.svc.prepareShutdown("quit");
+    for (const item of ctx.svc.listLive()) await ctx.exit(item.ptyId);
+    await ctx.svc.whenIdle();
+    ctx.svc.close();
+
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    await next.svc.whenSettled();
+    const stranger = (await next.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" })).ptyId;
+    const resumed = await next.svc.continueRun(leadRun);
+    expect(await next.svc.applyHandedTask({ fromPty: stranger, task: "Add e.txt" })).toMatchObject({ ok: false, error: expect.stringContaining("Only the CLI that handed") });
+    expect(await next.svc.applyHandedTask({ fromPty: resumed.ptyId, task: "Add e.txt" })).toMatchObject({ ok: true, files: ["e.txt"] });
+    expect(fs.existsSync(path.join(repo, "e.txt"))).toBe(true);
+    next.svc.close();
+  });
+
   it("fast-forwards a handed task's workspace when its copy was already merged on its remote", async () => {
     const git = (cwd: string, ...args: string[]) =>
       execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();

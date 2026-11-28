@@ -28,6 +28,7 @@ const ARGS: Record<string, string[]> = {
   tell: ["codex", "hello"],
   task: ["builder", "write the tests"],
   apply: ["task-1"],
+  remember: ["Tests use vitest."],
 };
 const HELP = new Set(["help", "--help", "-h"]);
 
@@ -37,6 +38,7 @@ function answerFor(op: string): unknown {
   if (op === "tell") return { ok: true, delivered: "sent", to: "codex" };
   if (op === "task") return { ok: true, started: false, title: "t", taskId: "task-1" };
   if (op === "apply") return { ok: true, files: [], note: "Applied.", conflicts: [] };
+  if (op === "remember") return { ok: true, agent: "Builder", note: "Tests use vitest.", flagged: false, waiting: 1 };
   return { ok: true };
 }
 
@@ -99,7 +101,7 @@ describe("the vibeforge launcher", () => {
   const commands = talkCommands(talkSource);
 
   it("finds talk.mjs's commands", () => {
-    expect(commands).toEqual(expect.arrayContaining(["apply", "help", "task", "tell", "who"]));
+    expect(commands).toEqual(expect.arrayContaining(["apply", "help", "remember", "task", "tell", "who"]));
   });
 
   it.each(commands)("hands `vibeforge %s` to talk.mjs", async (command) => {

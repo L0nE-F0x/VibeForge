@@ -2981,6 +2981,117 @@ h2 {
   text-overflow: ellipsis;
 }
 
+/* the review screen's file list, as the app draws it (src/ui/components/DiffReview.tsx) */
+
+.rv-files {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  font: 10.5px/1.5 var(--mono);
+}
+
+.rv-file {
+  display: grid;
+  grid-template-columns: 11px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+}
+
+.rv-file + .rv-file {
+  border-top: 1px solid var(--line);
+}
+
+.rv-file code {
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rv-tick {
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--line-2);
+}
+
+.rv-tick.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--bg);
+}
+
+.rv-new {
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
+  color: var(--green);
+}
+
+.rv-add {
+  color: var(--green);
+}
+
+.rv-seen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-3);
+}
+
+.rv-seen.on {
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  color: var(--green);
+}
+
+.rv-seen svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* a pane after a restart, offering its CLI's session back (src/ui/views/code/PaneView.tsx) */
+
+.art-resume {
+  gap: 10px;
+}
+
+.art-resume .tile {
+  flex: none;
+}
+
+.rs-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 0 -10px 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-2);
+  white-space: normal;
+}
+
+.rs-note {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-deep);
+  color: var(--fg-3);
+  font: 10.5px/1.5 var(--mono);
+}
+
+.rs-note b {
+  display: block;
+  color: var(--fg);
+}
+
+.rs-note .sy-ghost {
+  flex: none;
+}
+
 /* keys */
 
 .art-keys {

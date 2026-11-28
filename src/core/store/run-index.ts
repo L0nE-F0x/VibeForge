@@ -7,7 +7,7 @@ import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, runDir, writeRunMeta
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../../shared/text.js";
 import type { RunMeta, RunOrigin, RunStatus } from "../types.js";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
 const RUN_COLUMNS = [
   "id",
@@ -35,8 +35,12 @@ const RUN_COLUMNS = [
   "changes",
   "gitStart",
   "continuedFrom",
+  "result",
   "localHarness",
   "localModel",
+  "paneId",
+  "resumeArgs",
+  "cutOff",
 ] as const;
 
 export interface RunQuery {
@@ -85,6 +89,7 @@ function toRow(meta: RunMeta): Array<string | number | null> {
   return RUN_COLUMNS.map((column) => {
     const value = meta[column];
     if (column === "argv") return JSON.stringify(value);
+    if (column === "resumeArgs") return Array.isArray(value) && value.length ? JSON.stringify(value) : null;
     if (column === "stopRequested") return value ? 1 : 0;
     if (value === undefined) return null;
     return value as string | number | null;
@@ -186,7 +191,8 @@ export class RunIndex {
         id TEXT PRIMARY KEY, origin TEXT, title TEXT, agentId TEXT, routineId TEXT, taskId TEXT, chatId TEXT,
         workspaceId TEXT, engine TEXT, argv TEXT, cwd TEXT, prompt TEXT, startedAt TEXT, endedAt TEXT, status TEXT,
         exitCode INTEGER, signal INTEGER, stopRequested INTEGER, openedAt TEXT, notifiedAt TEXT, dir TEXT,
-        error TEXT, changes TEXT, gitStart TEXT, continuedFrom TEXT, localHarness TEXT, localModel TEXT
+        error TEXT, changes TEXT, gitStart TEXT, continuedFrom TEXT, result TEXT, localHarness TEXT, localModel TEXT,
+        paneId TEXT, resumeArgs TEXT, cutOff TEXT
       )`);
       this.db.exec("CREATE INDEX runs_started ON runs(startedAt DESC)");
       this.db.exec("CREATE INDEX runs_status ON runs(status)");

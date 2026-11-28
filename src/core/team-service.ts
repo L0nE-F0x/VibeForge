@@ -1,4 +1,4 @@
-import { ServiceCore } from "./service/core.js";
+import { ServiceCore, type PaneInputFrom } from "./service/core.js";
 import { LibraryDesk } from "./service/library.js";
 import { WorkspaceDesk } from "./service/workspaces.js";
 import { RoutineDesk } from "./service/routines.js";
@@ -6,6 +6,7 @@ import { TaskDesk } from "./service/tasks.js";
 import { ChatDesk } from "./service/chats.js";
 import { RunDesk } from "./service/runs.js";
 import { ShellRecorder } from "./service/shell-runs.js";
+import { SessionTracker } from "./service/session-tracker.js";
 import { FolderTurns, type SavedTurn } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import { OrchestratorDesk } from "./service/orchestrator.js";
@@ -14,16 +15,17 @@ import path from "node:path";
 import { detectLocalRuntimes, probeLocalServer, LOCAL_ENGINE_ID, normalizeLocalUrl, type LocalRuntimeStatus, type LocalServerProbe } from "./local.js";
 import { LocalServerRunner } from "./local-server.js";
 import { localServerPlan, localServerWanted, type LocalServerView } from "../shared/local.js";
-import type { Settings } from "./types.js";
+import type { CutOff, Settings } from "./types.js";
 import type { Looking, OrchestratorView, StepPatch, VibyWord } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus, UnreadableItem, WorkspaceCategory } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
-import type { ApplyResult } from "./worktrees.js";
+import type { ApplyResult, CopyReview } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
-import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
+import type { MemoryProposal } from "../shared/memory.js";
+import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RestorePick, RunRestorePreview, RunRestoreResult, RunRestoreUndoResult, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -35,12 +37,13 @@ export class TeamService extends ServiceCore {
   private readonly library = new LibraryDesk(this);
   private readonly workspaces = new WorkspaceDesk(this);
   private readonly turns = new FolderTurns(this);
-  private readonly routines = new RoutineDesk(this, this.turns);
   private readonly tasks = new TaskDesk(this, this.turns);
   private readonly chats = new ChatDesk(this);
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
+  private readonly sessions = new SessionTracker(this);
   private readonly messages = new MessageDesk(this, this.tasks);
+  private readonly routines = new RoutineDesk(this, this.turns, this.tasks, this.messages);
   readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages, this.tasks, this.routines, this.runs, this.library, this.chats);
 
   /** The Local AI server started from Settings → Local AI → Run a server. */
@@ -48,6 +51,8 @@ export class TeamService extends ServiceCore {
 
   constructor(options: DeskOptions) {
     super(options);
+    // Each live CLI's exact session, read from its own log, so a close can't lose which one it was.
+    this.sessions.start();
     // What was waiting for its folder when VibeForge last closed waits again.
     this.turns.restore((saved) => this.resumeWait(saved));
     this.localServer = new LocalServerRunner({
@@ -81,15 +86,23 @@ export class TeamService extends ServiceCore {
     };
   }
 
-  override prepareShutdown(): void {
+  override prepareShutdown(reason: CutOff = "quit"): void {
     // The CLIs are about to end, which frees their folders: nothing waiting should start now.
     this.turns.hold();
+    this.sessions.stop();
     // The Local AI server VibeForge started ends with it (it holds the GPU's memory).
     void this.localServer.stop();
-    super.prepareShutdown();
+    super.prepareShutdown(reason);
+  }
+
+  /** One more look at which session each live CLI is in, before a quit ends them. */
+  lookForSessions(): Promise<void> {
+    return this.sessions.look();
   }
 
   override close(): Promise<void> {
+    this.sessions.stop();
+    this.routines.close();
     this.turns.close();
     this.messages.close();
     this.orchestrator.close();
@@ -201,6 +214,26 @@ export class TeamService extends ServiceCore {
     this.library.writeMemory(agentId, text);
   }
 
+  rememberFromPty(input: { fromPty: string | null; text: string }): RememberResult {
+    return this.library.rememberFromPty(input);
+  }
+
+  listProposals(agentId: string): MemoryProposal[] {
+    return this.library.listProposals(agentId);
+  }
+
+  proposalCounts(): Record<string, number> {
+    return this.library.proposalCounts();
+  }
+
+  keepProposals(agentId: string, ids: readonly string[]): { lines: string[] } {
+    return this.library.keepProposals(agentId, ids);
+  }
+
+  dropProposals(agentId: string, ids: readonly string[]): Deleted {
+    return this.library.dropProposals(agentId, ids);
+  }
+
   listSkills(): Skill[] {
     return this.library.listSkills();
   }
@@ -248,7 +281,7 @@ export class TeamService extends ServiceCore {
     return this.workspaces.moveWorkspace(id, toIndex);
   }
 
-  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }): WorkspaceFile {
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[]; copySetup?: import("./types.js").WorkspaceCopySetup | null }): WorkspaceFile {
     return this.workspaces.updateWorkspace(id, patch);
   }
 
@@ -293,7 +326,7 @@ export class TeamService extends ServiceCore {
     this.workspaces.saveLayout(workspaceId, layout);
   }
 
-  startShell(opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize): Promise<{ ptyId: string }> {
+  startShell(opts: { workspaceId?: string; cwd?: string; command?: string; paneId?: string; continueRun?: string } & TermSize): Promise<{ ptyId: string; reopenFailed?: string }> {
     return this.workspaces.startShell(opts);
   }
 
@@ -301,7 +334,11 @@ export class TeamService extends ServiceCore {
     return this.workspaces.startCommand(opts);
   }
 
-  startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
+  reopenInShell(ptyId: string, runId: string): Promise<void> {
+    return this.workspaces.reopenInShell(ptyId, runId);
+  }
+
+  startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; paneId?: string; continueRun?: string } & TermSize): Promise<Launched> {
     return this.workspaces.startEngine(opts);
   }
 
@@ -408,12 +445,12 @@ export class TeamService extends ServiceCore {
     this.orchestrator.removeStep(turnId, stepId);
   }
 
-  orchestratorCopyDiff(copyId: string): Promise<string> {
+  orchestratorCopyDiff(copyId: string): Promise<CopyReview> {
     return this.orchestrator.copyDiff(copyId);
   }
 
-  orchestratorApplyCopy(copyId: string): Promise<ApplyResult> {
-    return this.orchestrator.applyCopy(copyId);
+  orchestratorApplyCopy(copyId: string, skip?: readonly string[]): Promise<ApplyResult> {
+    return this.orchestrator.applyCopy(copyId, skip);
   }
 
   orchestratorDiscardCopy(copyId: string): Promise<Deleted> {
@@ -434,8 +471,16 @@ export class TeamService extends ServiceCore {
     return this.routines.saveRoutine(input);
   }
 
-  deleteRoutine(id: string): Deleted {
+  deleteRoutine(id: string): Promise<Deleted> {
     return this.routines.deleteRoutine(id);
+  }
+
+  applyRoutineCopy(id: string): Promise<ApplyResult> {
+    return this.routines.applyCopy(id);
+  }
+
+  discardRoutineCopy(id: string): Promise<Deleted> {
+    return this.routines.discardCopy(id);
   }
 
   setRoutineEnabled(id: string, enabled: boolean): Routine {
@@ -524,8 +569,8 @@ export class TeamService extends ServiceCore {
     return this.messages.applyHanded(input);
   }
 
-  /** Send to…: one pane's last answer, selection or changes, as a draft in another pane. */
-  sendDraft(input: { fromPty: string; toPty: string; what: "reply" | "selection" | "changes"; selection?: string }): Promise<{ sent: boolean }> {
+  /** Send to…: one pane's last answer, selection or changes, or review notes, as a draft in another pane. */
+  sendDraft(input: { fromPty: string | null; toPty: string; what: "reply" | "selection" | "changes" | "notes"; selection?: string }): Promise<{ sent: boolean }> {
     return this.messages.sendDraft(input);
   }
 
@@ -539,7 +584,17 @@ export class TeamService extends ServiceCore {
 
   /** A person typed into a terminal (not a message from another CLI). */
   onHumanInput(ptyId: string, data: string): void {
-    this.messages.onHumanInput(ptyId, data);
+    this.paneInput(ptyId, data, "person");
+  }
+
+  /** Every write into a pane: a person's counts start again; a routine hears it was answered. */
+  override paneInput(ptyId: string, data: string, from: PaneInputFrom): void {
+    if (from === "person") this.messages.onHumanInput(ptyId, data);
+    this.routines.onPaneInput(ptyId, data);
+  }
+
+  override expectsReply(ptyId: string): boolean {
+    return this.messages.expectsReport(ptyId);
   }
 
   /** Delivers waiting messages and reads answers now (also every second while any are in flight). */
@@ -560,8 +615,12 @@ export class TeamService extends ServiceCore {
     return this.tasks.setTaskStatus(id, status);
   }
 
-  applyTaskCopy(id: string): Promise<ApplyResult> {
-    return this.tasks.applyCopy(id);
+  taskCopyDiff(id: string): Promise<CopyReview> {
+    return this.tasks.copyDiff(id);
+  }
+
+  applyTaskCopy(id: string, skip?: readonly string[]): Promise<ApplyResult> {
+    return this.tasks.applyCopy(id, skip);
   }
 
   discardTaskCopy(id: string): Promise<Deleted> {
@@ -591,10 +650,8 @@ export class TeamService extends ServiceCore {
   }
 
   async sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
-    const result = await this.chats.sendChat(id, text, size);
-    // Typed into a live session by a person, like typing in its terminal.
-    if (!result.started) this.messages.onHumanInput(result.ptyId, "\r");
-    return result;
+    // Typed into a live session, it reports itself as a person's input (ChatDesk.sendChat).
+    return this.chats.sendChat(id, text, size);
   }
 
   /** Start an agent in a workspace it is allowed to use, with its brief. */
@@ -652,6 +709,18 @@ export class TeamService extends ServiceCore {
 
   runMarkdown(id: string): Promise<string> {
     return this.runs.runMarkdown(id);
+  }
+
+  previewRunRestore(id: string): Promise<RunRestorePreview> {
+    return this.runs.previewRestore(id);
+  }
+
+  restoreRun(id: string, picks: readonly RestorePick[]): Promise<RunRestoreResult> {
+    return this.runs.restoreRun(id, picks);
+  }
+
+  override undoRunRestore(token: string): Promise<RunRestoreUndoResult> {
+    return super.undoRunRestore(token);
   }
 
   searchRuns(text: string, limit?: number): RunHit[] {

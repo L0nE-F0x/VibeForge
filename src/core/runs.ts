@@ -3,7 +3,7 @@ import path from "node:path";
 import { readJson, readText, writeJson } from "./fsx.js";
 import { hasRunFile, readRunText } from "./run-storage.js";
 import { isSafeId } from "./slug.js";
-import type { RunMeta, RunOrigin, RunStatus } from "./types.js";
+import type { CutOff, RoutineRunResult, RunMeta, RunOrigin, RunStatus } from "./types.js";
 import { isCommitId } from "./worktrees.js";
 
 /** What a run directory holds. The PTY host writes the terminal files, the service writes the rest. */
@@ -17,10 +17,13 @@ export const RUN_FILES = {
   git: "git.txt",
   /** Full patch frozen when the run ended. Absent on runs saved before this existed. Gzipped later (run-storage.ts). */
   patch: "diff.patch",
+  /** Before-and-after git snapshot refs and oversized skipped files for restoring what a run did. */
+  snapshots: "snapshots.json",
 } as const;
 
 export const RUN_ORIGINS: RunOrigin[] = ["agent-chat", "routine", "task", "code", "chat"];
 export const RUN_STATUSES: RunStatus[] = ["running", "exited", "stopped", "failed"];
+export const RUN_RESULTS: RoutineRunResult[] = ["finished", "question", "timeout", "limit", "stuck", "cutoff", "failed"];
 
 export function runFolderStamp(date: Date): string {
   const iso = date.toISOString();
@@ -64,6 +67,21 @@ function strOrNull(value: unknown): string | null {
 
 function numOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+const CUT_OFFS: CutOff[] = ["quit", "update", "crash"];
+
+/** A list of strings, as meta.json keeps it or the index keeps it (JSON text). */
+function stringArray(value: unknown): string[] | null {
+  let list = value;
+  if (typeof value === "string") {
+    try {
+      list = JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : null;
 }
 
 export function normalizeRun(value: unknown): RunMeta | null {
@@ -112,8 +130,15 @@ export function normalizeRun(value: unknown): RunMeta | null {
       return sha && isCommitId(sha) ? sha : null;
     })(),
     continuedFrom: strOrNull(record.continuedFrom),
+    ...(RUN_RESULTS.includes(record.result as RoutineRunResult) ? { result: record.result as RoutineRunResult } : {}),
     ...(strOrNull(record.localHarness) ? { localHarness: strOrNull(record.localHarness) } : {}),
     ...(strOrNull(record.localModel) ? { localModel: strOrNull(record.localModel) } : {}),
+    ...(strOrNull(record.paneId) ? { paneId: strOrNull(record.paneId) } : {}),
+    ...(() => {
+      const args = stringArray(record.resumeArgs);
+      return args?.length ? { resumeArgs: args } : {};
+    })(),
+    ...(CUT_OFFS.includes(record.cutOff as CutOff) ? { cutOff: record.cutOff as CutOff } : {}),
   };
 }
 

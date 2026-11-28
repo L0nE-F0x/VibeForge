@@ -160,6 +160,8 @@ export class ChatDesk {
     const livePty = lastId ? this.core.ptyByRun.get(lastId) : undefined;
     if (lastId && livePty) {
       await this.core.options.host.send(livePty, text);
+      // Sent into a live session for a person, like typing it in its terminal.
+      this.core.paneInput(livePty, `${text}\r`, "person");
       try {
         this.core.store.writeChat({ ...chat, updatedAt: this.core.now().toISOString() });
       } catch {

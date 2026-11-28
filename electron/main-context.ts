@@ -15,6 +15,22 @@ import { UnexpectedErrors } from "./unexpected.js";
 // What the main process's parts share. main.ts makes one and hands it to each module beside it,
 // so the window, the core and the quit flag each have this one owner instead of a copy per file.
 
+/** How many "proposed a memory line" notices wait for the page: one per agent, the newest few. */
+const PROPOSED_HELD = 5;
+
+/**
+ * The notices waiting for the next page, with `notice` added. Each kind waits once (the newest);
+ * memory proposals wait once per agent and only the newest few, so a burst of them never pushes
+ * out a host-stopped or errors notice.
+ */
+export function holdNotice(held: readonly DeskNotice[], notice: DeskNotice): DeskNotice[] {
+  const kind = (item: DeskNotice) => (item.id === "memory-proposed" ? `${item.id}:${item.agentId}` : item.id);
+  const next = [...held.filter((item) => kind(item) !== kind(notice)), notice];
+  const proposed = next.filter((item) => item.id === "memory-proposed");
+  const drop = new Set<DeskNotice>(proposed.slice(0, Math.max(0, proposed.length - PROPOSED_HELD)));
+  return next.filter((item) => !drop.has(item));
+}
+
 /** Sends an event to the window's page, when there is one. */
 export type Send = <K extends keyof DeskEvents>(event: K, payload: DeskEvents[K]) => void;
 
@@ -55,6 +71,8 @@ export class MainContext {
   looking: Looking | null = null;
   /** A quit has begun: the window closes without asking, and the terminal host stays down. */
   quitting = false;
+  /** Why this quit is happening, when it is a restart to finish an update; else an ordinary quit. */
+  closeReason: "update" | null = null;
   /** Notices said while no page was listening, for the next one; one of each kind, the newest. */
   private pendingNotices: DeskNotice[] = [];
   /** A page has taken its notices since it last loaded, so it hears new ones as they happen. */
@@ -86,7 +104,7 @@ export class MainContext {
       this.send("notice", notice);
       return;
     }
-    this.pendingNotices = [...this.pendingNotices.filter((held) => held.id !== notice.id), notice];
+    this.pendingNotices = holdNotice(this.pendingNotices, notice);
   };
 
   /** The page's first call: what it missed. From now on it hears notices as they happen. */

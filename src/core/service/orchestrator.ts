@@ -88,7 +88,7 @@ import {
   voiceName,
   type VoiceBackend,
 } from "../voice.js";
-import type { ApplyResult } from "../worktrees.js";
+import type { ApplyResult, CopyReview } from "../worktrees.js";
 import type { ChatDesk } from "./chats.js";
 import type { ServiceCore } from "./core.js";
 import type { LibraryDesk } from "./library.js";
@@ -2050,14 +2050,14 @@ export class OrchestratorDesk {
 
   // ---------------------------------------------------------------- copies
 
-  /** A step's copy: everything it changed, as Apply would bring it in. */
-  copyDiff(copyId: string): Promise<string> {
-    return this.copies.diff(copyId);
+  /** A step's copy: everything it changed, as Apply would bring it in, with its list of files. */
+  copyDiff(copyId: string): Promise<CopyReview> {
+    return this.copies.review(copyId);
   }
 
-  /** Apply a step's copy into the workspace it came from (see MaestroCopies.apply). */
-  applyCopy(copyId: string): Promise<ApplyResult> {
-    return this.copies.apply(copyId);
+  /** Apply a step's copy into the workspace it came from, leaving out `skip` (see MaestroCopies.apply). */
+  applyCopy(copyId: string, skip?: readonly string[]): Promise<ApplyResult> {
+    return this.copies.apply(copyId, skip);
   }
 
   /** Throw a step's copy away, with Undo (see MaestroCopies.discard). */
@@ -2338,7 +2338,7 @@ export class OrchestratorDesk {
 
   private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep, epoch = this.runEpoch, auto = false): Promise<void> {
     if (step.kind === "workspace") {
-      await carryOutWorkspaceStep(this.entityDeps(), turn, step);
+      await carryOutWorkspaceStep(this.entityDeps(), turn, step, auto);
       return;
     }
     if (step.kind === "agent") {
@@ -2385,6 +2385,8 @@ export class OrchestratorDesk {
       if (agent && !cwdAllowed(workspace.path, agent.places)) throw new Error(`${agent.name} is not allowed in ${workspace.name}.`);
       let workspaceId = workspace.id;
       let copyOf: { path: string; of: string } | null = null;
+      let setupCommand: string | null = null;
+      let setupNotes: string[] = [];
       if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
         if (await hasCommit(workspace.path)) {
           // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
@@ -2392,6 +2394,8 @@ export class OrchestratorDesk {
           step.copyId = copy.id;
           step.branch = copy.branch;
           workspaceId = copy.openedWorkspaceId;
+          setupCommand = copy.setupCommand;
+          setupNotes = copy.setupNotes;
           // An agent's brief names its allowed folders: it's told to work in the copy instead.
           const opened = this.core.workspaceById(workspaceId);
           if (opened) copyOf = { path: opened.path, of: workspace.path };
@@ -2401,7 +2405,7 @@ export class OrchestratorDesk {
         }
       }
       step.openedWorkspaceId = workspaceId;
-      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, copyOf, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
+      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, copyOf, prompt: step.prompt, orchestrated: true, setupCommand, setupNotes, model: step.model, effort: step.effort, ...START_SIZE });
       step.ptyId = launched.ptyId;
       step.runId = launched.runId;
       this.followTo(workspaceId, launched.ptyId);
@@ -2439,6 +2443,10 @@ export class OrchestratorDesk {
       }
       if (this.core.options.host.write) await this.core.options.host.write(step.target, action.data);
       else await this.core.options.host.send(step.target, action.data.replace(/\r$/, ""), action.data.endsWith("\r"));
+      // Viby answering a CLI for the person: routines and messages hear of it as they do of typing.
+      // Viby's keys, not the person's: they answer the CLI (a routine hears it) without lifting a
+      // Stop or resetting the limits on CLIs messaging each other.
+      this.core.paneInput(step.target, action.data, "cli");
       this.followTo(session?.workspaceId, step.target);
       step.result = `Sent ${action.label}.`;
       return;

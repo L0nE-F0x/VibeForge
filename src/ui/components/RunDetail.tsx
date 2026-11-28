@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowUpRight,
   Bot,
   CheckCheck,
@@ -9,6 +10,7 @@ import {
   FileText,
   FolderOpen,
   Forward,
+  GitBranch,
   GitCompare,
   Info,
   ListRestart,
@@ -18,21 +20,27 @@ import {
   ScrollText,
   Square,
   TerminalSquare,
+  Trash2,
+  Undo2,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { RunView, Topic } from "../../shared/api.js";
+import { memo, useEffect, useRef, useState } from "react";
+import type { CopyReview, RunRestoreAvailability, RunRestorePreview, RunRestoreUndoResult, RunView, TaskView, Topic } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
 import { duration, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
-import { routeForRun, useAction, useNav, useToast } from "../state.js";
+import { call, useAgents, useAppInfo, useEngines, useNow, useQuery, useTasks, useWorkspaces } from "../api.js";
+import { applyToast } from "../apply-note.js";
+import { routeForRun, useAction, useDeleted, useNav, useToast } from "../state.js";
 import { setPtyInView } from "../attention.js";
 import { usePlace } from "../remember.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { useNarrowStage } from "./SidePanel.js";
-import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { CopyApplyButton } from "./CopyApply.js";
+import { DiffReview } from "./DiffReviewLazy.js";
+import { useCopyPick } from "../copy-pick.js";
+import { Button, Chip, Empty, MenuButton, Modal, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { Rich } from "../i18n/Rich.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
-import { diffFiles } from "../diff-files.js";
 import { changesFor } from "../changes-text.js";
 import { shortcutKeys } from "../shortcuts.js";
 
@@ -48,44 +56,10 @@ type Tab = "session" | "changes" | "prompt" | "transcript" | "details";
 const TABS: readonly Tab[] = ["session", "changes", "prompt", "transcript", "details"];
 const isTab = (value: unknown): value is Tab => TABS.includes(value as Tab);
 
-/** A diff, one row per line up to 20,000. Memoised: a big one is slow to build and rarely changes. */
+/** Compact syntax-coloured diff view (used for conflict diffs in dialogs). */
 export const DiffView = memo(function DiffView({ text }: { text: string }) {
-  const t = useT();
-  const all = useMemo(() => text.split("\n"), [text]);
-  const rows = useMemo(
-    () =>
-      (all.length > DIFF_CAP ? all.slice(0, DIFF_CAP) : all).map((line, index) => {
-        const kind = line.startsWith("diff --git")
-          ? "file"
-          : line.startsWith("#")
-            ? "meta"
-            : line.startsWith("@@")
-              ? "hunk"
-              : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode")
-                ? "meta"
-                : line.startsWith("+")
-                  ? "add"
-                  : line.startsWith("-")
-                    ? "del"
-                    : "";
-        return (
-          <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
-            {line || " "}
-          </div>
-        );
-      }),
-    [all],
-  );
-  if (!text.trim()) return <Notice>{t("run.noDiff")}</Notice>;
-  return (
-    <>
-      <div className="diff">{rows}</div>
-      {all.length > DIFF_CAP && <Notice>{t("run.diffCapped")}</Notice>}
-    </>
-  );
+  return <DiffReview text={text} compact />;
 });
-
-const DIFF_CAP = 20000;
 
 /** How long a run took, or has taken so far. Only a running one ticks, and only this text re-renders. */
 function Elapsed({ start, end }: { start: string; end: string | null }) {
@@ -128,8 +102,18 @@ function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null
 }
 
 function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: string; patchSaved: boolean }) {
-  const t = useT();
   const { push } = useToast();
+  const tasks = useTasks().data ?? [];
+  const task = run.taskId ? tasks.find((item) => item.id === run.taskId) : undefined;
+  // The last run of a task in its own copy shows the copy itself, as the task's sheet does: the
+  // files Apply would bring in, renames paired the same way, from every run in it.
+  const copy = task?.copy;
+  if (task && copy && task.copyOwned && run.id === task.lastRun?.id && !task.lastRun?.live && run.status !== "running") return <CopyChanges run={run} task={task} copy={copy} />;
+  return <RunChanges run={run} snapshot={snapshot} patchSaved={patchSaved} push={push} />;
+}
+
+function RunChanges({ run, snapshot, patchSaved, push }: { run: RunView; snapshot: string; patchSaved: boolean; push: ReturnType<typeof useToast>["push"] }) {
+  const t = useT();
   const [diff, setDiff] = useState<{ text: string; source: "saved" | "now" } | null>(null);
   const [load, loading] = useAction(async (source: "saved" | "now") => {
     setDiff({ text: await call("runs.diff", run.id, source), source });
@@ -138,11 +122,10 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
   const saved = run.status !== "running" && patchSaved;
   // What a finished run changed is the point of reviewing it: its saved diff opens with the tab.
   useEffect(() => {
+    setDiff(null);
     if (saved && !notRepo) void load("saved");
-  }, [saved, notRepo, load]);
-  const files = useMemo(() => (diff ? diffFiles(diff.text) : []), [diff]);
-  const diffBox = useRef<HTMLDivElement>(null);
-  const showFile = (line: number) => diffBox.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [run.id, saved, notRepo, load]);
+
   return (
     <div className="page-body vstack" style={{ gap: 14 }}>
       {run.status === "running" && <Notice icon={Info}>{t("run.diffLater")}</Notice>}
@@ -171,27 +154,201 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
             )}
             <span className="faint">{diffCaption(run, saved, diff?.source ?? null, t)}</span>
           </div>
-          {files.length > 0 && (
-            <div className="diff-files">
-              {files.map((file) => (
-                <button key={file.line} type="button" className="diff-file" onClick={() => showFile(file.line)}>
-                  <FileText size={13} className="faint" />
-                  <span className="mono truncate grow">{file.path}</span>
-                  {file.added > 0 && <span className="diff-count add">+{file.added}</span>}
-                  {file.removed > 0 && <span className="diff-count del">−{file.removed}</span>}
-                </button>
-              ))}
-            </div>
-          )}
-          {diff !== null && (
-            <div ref={diffBox}>
-              <DiffView text={diff.text} />
-            </div>
-          )}
+          {diff !== null && <DiffReview text={diff.text} reviewKey={run.id} workspaceId={run.workspaceId} folder={run.cwd} preferredPtyId={run.live ? run.ptyId : null} />}
           {snapshot && (diff === null || !diff.text.trim()) && <pre className="pre">{snapshot.trim()}</pre>}
         </div>
       )}
     </div>
+  );
+}
+
+function CopyChanges({ run, task, copy }: { run: RunView; task: TaskView; copy: NonNullable<TaskView["copy"]> }) {
+  const t = useT();
+  const { push } = useToast();
+  const deleted = useDeleted();
+  const home = useAppInfo().data?.home ?? "";
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const workspaceName = workspaces.find((item) => item.id === task.workspaceId)?.name ?? copy.repo;
+  const [review, setReview] = useState<CopyReview | null>(null);
+  const [load, loading] = useAction(async () => setReview(await call("tasks.copyDiff", task.id)), t("run.diffFailed"));
+  useEffect(() => {
+    setReview(null);
+    void load();
+  }, [task.id, copy.path, run.id, load]);
+  const pick = useCopyPick(review?.files);
+  const [applyCopy, applying] = useAction(async () => {
+    const result = await call("tasks.applyCopy", task.id, pick.skip);
+    const toast = applyToast(t, result, workspaceName, home);
+    push(toast.tone, toast.title, toast.body);
+    if (result.stayed || result.conflicts.length || result.left) void load();
+  }, t("tasks.applyFailed"));
+  const [discardCopy, discarding] = useAction(async () => {
+    const result = await call("tasks.discardCopy", task.id);
+    deleted(t("tasks.copyDiscarded", { title: task.title }), result);
+  }, t("tasks.discardFailed"));
+
+  return (
+    <div className="page-body vstack" style={{ gap: 14 }}>
+      <div className="vstack">
+        <div className="hstack wrap">
+          <Button icon={GitCompare} busy={loading} onClick={() => void load()}>
+            {t("run.refreshDiff")}
+          </Button>
+          {review && (
+            <Button size="sm" variant="ghost" icon={Copy} onClick={() => void navigator.clipboard.writeText(review.patch).then(() => push("success", t("run.diffCopied")))}>
+              {t("common.copy")}
+            </Button>
+          )}
+          <span className="faint">{t("run.diffCopy")}</span>
+        </div>
+        <Notice tone="accent" icon={GitBranch}>
+          <div className="hstack wrap">
+            <span className="grow">
+              <Rich text={t("tasks.copyNote", { branch: copy.branch, workspace: workspaceName })} />
+            </span>
+            <CopyApplyButton pick={pick} workspace={workspaceName} tip={t("tasks.applyTip")} busy={applying} onApply={() => void applyCopy()} />
+            <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} onClick={() => void discardCopy()}>
+              {t("tasks.discardCopy")}
+            </Button>
+          </div>
+        </Notice>
+        {review !== null && <DiffReview text={review.patch} reviewKey={`task:${task.id}`} workspaceId={run.workspaceId} folder={copy.path} selection={pick.selection} />}
+      </div>
+    </div>
+  );
+}
+
+function restoreNote(restore: RunRestoreAvailability, t: Translator): string | undefined {
+  if (restore === "running") return t("runs.restoreWhileRunning");
+  if (restore === "missing") return t("runs.restoreMissing");
+  if (restore === "no-changes") return t("runs.restoreNoChanges");
+  if (restore === "not-repo") return t("runs.restoreNotRepo");
+  if (restore === "folder-gone") return t("runs.restoreFolderGone");
+  return undefined;
+}
+
+function summarizeFiles(files: string[]): string {
+  const shown = files.slice(0, 6).join(", ");
+  return files.length > 6 ? `${shown}, …` : shown;
+}
+
+const LEFT_ALONE_BODY = {
+  changed: "runs.restoredLeftChanged",
+  oversized: "runs.restoredLeftOversized",
+  submodule: "runs.restoredLeftSubmodule",
+  filtered: "runs.restoredLeftFiltered",
+} as const;
+
+const LEFT_ALONE_LABEL = {
+  changed: "runs.restoreReasonChanged",
+  oversized: "runs.restoreReasonOversized",
+  submodule: "runs.restoreReasonSubmodule",
+  filtered: "runs.restoreReasonFiltered",
+} as const;
+
+function leftAloneBody(leftAlone: RunRestorePreview["leftAlone"], t: Translator): string | undefined {
+  const parts: string[] = [];
+  for (const reason of Object.keys(LEFT_ALONE_BODY) as Array<keyof typeof LEFT_ALONE_BODY>) {
+    const files = leftAlone.filter((item) => item.reason === reason).map((item) => item.path);
+    if (files.length) parts.push(t(LEFT_ALONE_BODY[reason], { files: summarizeFiles(files) }));
+  }
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+/** What Undo of a restore did: all of it, some of it (saying which files it left), or none. */
+function undoRestoreToast(result: RunRestoreUndoResult, t: Translator): { tone: "info" | "error"; title: string; body?: string } {
+  if (!result.leftAlone.length) return { tone: "info", title: t("runs.restoreUndone") };
+  const body = t("runs.restoreUndoLeft", { files: summarizeFiles(result.leftAlone) });
+  if (!result.reverted.length) return { tone: "error", title: t("runs.restoreUndoNothing"), body };
+  return { tone: "info", title: t("runs.restoreUndonePartly", { done: String(result.reverted.length), total: String(result.reverted.length + result.leftAlone.length) }), body };
+}
+
+function RestoreConfirmModal({
+  preview,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  preview: RunRestorePreview;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useT();
+  const none = preview.restorable.length === 0;
+  return (
+    <Modal
+      title={t("runs.restoreTitle")}
+      icon={Undo2}
+      onClose={() => {
+        if (!busy) onCancel();
+      }}
+      footer={
+        none ? (
+          <Button variant="primary" onClick={onCancel} autoFocus>
+            {t("common.close")}
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" disabled={busy} onClick={onCancel}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="primary" busy={busy} onClick={onConfirm} autoFocus>
+              {t("runs.restoreConfirm")}
+            </Button>
+          </>
+        )
+      }
+    >
+      {none ? (
+        <Notice>{preview.leftAlone.length > 0 ? t("runs.restoreNoneLeft") : t("runs.restoreAlreadyBack")}</Notice>
+      ) : (
+        <>
+          {preview.overlapping.length > 0 && (
+            <Notice tone="warn" icon={AlertTriangle}>
+              {t("runs.restoreOverlap", { runs: preview.overlapping.map((other) => other.title).join(", ") })}
+            </Notice>
+          )}
+          {preview.lateEnd && (
+            <Notice tone="warn" icon={AlertTriangle}>
+              {t("runs.restoreLateEnd")}
+            </Notice>
+          )}
+          <div className="muted" style={{ lineHeight: 1.55 }}>
+            {t.count("runs.restoreCount", preview.restorable.length)}
+            {preview.leftAlone.length > 0 ? ` ${t.count("runs.restoreLeftCount", preview.leftAlone.length)}` : ""}
+          </div>
+          <div className="muted" style={{ lineHeight: 1.55 }}>
+            {t("runs.restoreHereToo")} {t("runs.restoreIgnoredNote")}
+          </div>
+          <div className="branch-list">
+            {preview.restorable.map((item) => (
+              <div key={item.path} className="hstack" style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)" }}>
+                <span className="faint" style={{ fontSize: "var(--fs-xs)", minWidth: 64 }}>
+                  {t(item.action === "delete" ? "runs.restoreActionDelete" : item.action === "recreate" ? "runs.restoreActionRecreate" : "runs.restoreActionRestore")}
+                </span>
+                <span className="mono truncate grow">{item.path}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {preview.leftAlone.length > 0 && (
+        <div className="vstack" style={{ gap: 6 }}>
+          <div className="list-label">{t("runs.restoreLeftHeading")}</div>
+          <div className="branch-list">
+            {preview.leftAlone.map((item) => (
+              <div key={item.path} className="hstack" style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)" }}>
+                <span className="faint" style={{ fontSize: "var(--fs-xs)", minWidth: 96 }}>
+                  {t(LEFT_ALONE_LABEL[item.reason])}
+                </span>
+                <span className="mono truncate grow">{item.path}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -213,7 +370,7 @@ export function RunDetail({
 }) {
   const t = useT();
   const { go } = useNav();
-  const { push } = useToast();
+  const { push, fail } = useToast();
   // A running run follows its terminal; a finished one changes only when the runs do. Its files
   // are large and don't move with the clock, so the 30 s refresh skips them and they aren't kept.
   const bundle = useQuery(`run:${runId}`, (data) => (data?.run.status === "running" ? RUNNING_TOPICS : DONE_TOPICS), () => call("runs.get", runId), {
@@ -228,6 +385,8 @@ export function RunDetail({
   const narrow = useNarrowStage();
   const run = bundle.data?.run;
   const files = bundle.data?.files;
+  const restore = bundle.data?.restore ?? "missing";
+  const [restorePreview, setRestorePreview] = useState<RunRestorePreview | null>(null);
 
   // Opening a finished run marks it reviewed, once per visit: "Put it back in Needs review" from
   // its menu then stays put instead of being marked again as the run reloads.
@@ -260,6 +419,41 @@ export function RunDetail({
     go({ view: "tasks", taskId: task.id });
     push("success", t("handoff.done", { agent: agents.find((agent) => agent.id === agentId)?.name ?? "" }), t("handoff.doneBody"));
   }, t("handoff.failed"));
+  const [askRestore, previewingRestore] = useAction(async () => {
+    if (!run) return;
+    setRestorePreview(await call("runs.restorePreview", run.id));
+  }, t("runs.restoreFailed"));
+  const [confirmRestore, applyingRestore] = useAction(async () => {
+    if (!run || !restorePreview) return;
+    // Exactly what the preview showed: a file that changed since is left alone.
+    const result = await call(
+      "runs.restore",
+      run.id,
+      restorePreview.restorable.map((item) => ({ path: item.path, expect: item.expect })),
+    );
+    setRestorePreview(null);
+    if (result.restored.length === 0) {
+      push("info", t("runs.restoreNothingDone"), leftAloneBody(result.leftAlone, t));
+      return;
+    }
+    push(
+      "success",
+      t.count("runs.restoredTitle", result.restored.length),
+      leftAloneBody(result.leftAlone, t),
+      result.undo
+        ? {
+            label: t("common.undo"),
+            run: () =>
+              void call("runs.undoRestore", result.undo!)
+                .then((undone) => {
+                  const toast = undoRestoreToast(undone, t);
+                  push(toast.tone, toast.title, toast.body);
+                })
+                .catch((error: unknown) => fail(error, t("common.undoFailed"))),
+          }
+        : undefined,
+    );
+  }, t("runs.restoreFailed"));
 
   if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
@@ -285,7 +479,7 @@ export function RunDetail({
         <div className="vstack grow" style={{ gap: 1 }}>
           <div className="hstack">
             <h1 className="truncate">{run.title}</h1>
-            <StatusChip status={run.status} exitCode={run.exitCode} />
+            <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} origin={run.origin} cutOff={run.cutOff} />
             {isLocalRun && (
               <Chip tone="accent" title={run.localModel ?? undefined}>
                 {run.localModel ? `${t("pane.local")} · ${shortLocalModel(run.localModel)}` : t("pane.local")}
@@ -346,6 +540,18 @@ export function RunDetail({
                     onSelect: () => void call("runs.markOpened", run.id, !run.openedAt),
                   },
                 ]),
+            ...(restore === "in-copy"
+              ? []
+              : [
+                  "sep" as const,
+                  {
+                    label: t("runs.restore"),
+                    icon: Undo2,
+                    disabled: restore !== "ready" || previewingRestore || applyingRestore,
+                    note: restoreNote(restore, t),
+                    onSelect: () => void askRestore(),
+                  },
+                ]),
           ]}
         />
       </div>
@@ -360,6 +566,11 @@ export function RunDetail({
           { value: "details", label: t("run.tab.details"), icon: Info },
         ]}
       />
+      {run.status === "running" && run.result === "question" && (
+        <div style={{ padding: "10px 16px 0" }}>
+          <Notice tone="warn">{t("routines.questionNote")}</Notice>
+        </div>
+      )}
       {run.error && run.status !== "running" && (
         <div style={{ padding: "10px 16px 0" }}>
           <Notice tone={run.status === "failed" ? "bad" : "warn"}>{coreText(run.error)}</Notice>
@@ -439,6 +650,14 @@ export function RunDetail({
             </Button>
           </div>
         </div>
+      )}
+      {restorePreview && (
+        <RestoreConfirmModal
+          preview={restorePreview}
+          busy={applyingRestore}
+          onCancel={() => setRestorePreview(null)}
+          onConfirm={() => void confirmRestore()}
+        />
       )}
     </div>
   );

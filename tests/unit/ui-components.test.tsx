@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Button, Field, Input, Select, TextArea, splitHint } from "../../src/ui/components/ui.js";
+import { Button, Field, Input, Menu, Select, TextArea, splitHint } from "../../src/ui/components/ui.js";
 import { VibySprite } from "../../src/ui/components/Pixel.js";
 
 describe("UI primitives", () => {
@@ -93,5 +93,22 @@ describe("UI primitives", () => {
     const decorative = renderToStaticMarkup(<VibySprite mood="idle" animated={false} />);
     expect(decorative).toContain('aria-hidden="true"');
     expect(decorative).not.toContain('role="img"');
+  });
+
+  it("renders disabled Menu items with an explanatory note", () => {
+    const html = renderToStaticMarkup(
+      <Menu
+        onClose={() => undefined}
+        items={[
+          { label: "Open folder", onSelect: () => undefined },
+          "sep",
+          { label: "Put files back as before this run", disabled: true, note: "Available once this run finishes.", onSelect: () => undefined },
+        ]}
+      />,
+    );
+    expect(html).toContain("Put files back as before this run");
+    expect(html).toContain('class="menu-note"');
+    expect(html).toContain("Available once this run finishes.");
+    expect(html).toContain("disabled");
   });
 });

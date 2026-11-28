@@ -10,7 +10,7 @@ import { gitHead, snapshotGit } from "../src/core/vcs.js";
 import type { Dock } from "./dock.js";
 import type { MainContext } from "./main-context.js";
 import type { Notify } from "./notify.js";
-import { lastReply, watchReply } from "./replies.js";
+import { lastReply, sessionLogs, watchReply } from "./replies.js";
 import { childEnv } from "./shell-env.js";
 import type { Stats } from "./stats.js";
 import type { Updater } from "./updater.js";
@@ -56,6 +56,7 @@ export function deskHost(
     foreground: (ptyId) => supervisor.foreground(ptyId),
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
+    sessionLogs: (opts) => sessionLogs({ ...opts, home: os.homedir() }),
     kill: (ptyId) => supervisor.kill(ptyId),
     syncLibrary: async (kind, id, on) => {
       const sync = extras?.sync?.();
@@ -65,6 +66,7 @@ export function deskHost(
     record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
     resolveBin: (bin) => whichBin(bin),
     logDiagnostics: (line) => log.info(line),
+    logWarn: (line) => log.warn(line),
     // The core speaks English; its notes are put in the window's language here.
     notify: (note) => notify({ ...note, body: words.coreText(note.body) }),
     finished: (run) => send("run-finished", run),
@@ -83,6 +85,7 @@ export function deskHost(
     ...(extras?.openFolder ? { openFolder: extras.openFolder } : {}),
     ...(extras?.writeClipboard ? { writeClipboard: extras.writeClipboard } : {}),
     ...(extras?.computer ? { computer: extras.computer } : {}),
+    memoryProposed: (item) => ctx.notice({ id: "memory-proposed", ...item }),
     ...(extras?.updater
       ? {
           checkUpdates: async () => {

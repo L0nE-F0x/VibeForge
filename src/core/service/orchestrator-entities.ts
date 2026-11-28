@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { effortForModel } from "../../shared/launch-options.js";
+import { copySetupChange, copySetupNeedsGo } from "../../shared/copy-setup.js";
 import { isDirectory } from "../fsx.js";
 import { LOCAL_ENGINE_ID, localModeRoutesViby } from "../../shared/local.js";
 import {
@@ -98,7 +99,7 @@ async function makeWorkspace(deps: EntityStepDeps, step: OrchestratorStep): Prom
   return id;
 }
 
-export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: OrchestratorTurn, step: OrchestratorStep, auto = false): Promise<void> {
   const action = normalizeWorkspaceAction(step.action);
   if (!action || action === "create") {
     const workspaceId = await makeWorkspace(deps, step);
@@ -140,6 +141,29 @@ export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: Orchestr
     deps.workspaces.moveWorkspace(ws.id, toIndex);
     step.openedWorkspaceId = ws.id;
     step.result = `Moved ${ws.name} to position ${toIndex + 1}.`;
+    return;
+  }
+  if (action === "copy-setup") {
+    const change = copySetupChange(step) ?? {};
+    if (auto && copySetupNeedsGo(change, ws.copySetup ?? null)) {
+      throw new Error("Changing what a workspace's copies get waits for Go.");
+    }
+    const next = { ...(ws.copySetup ?? {}) };
+    if (change.files === null) delete next.files;
+    else if (change.files) next.files = change.files;
+    if (change.folders) {
+      if (change.folders.length) next.folders = change.folders;
+      else delete next.folders;
+    }
+    if (change.worktreeInclude === true) delete next.worktreeInclude;
+    else if (change.worktreeInclude === false) next.worktreeInclude = false;
+    if (change.command !== undefined) {
+      if (change.command) next.setupCommand = change.command;
+      else delete next.setupCommand;
+    }
+    deps.workspaces.updateWorkspace(ws.id, { copySetup: next });
+    step.openedWorkspaceId = ws.id;
+    step.result = `Updated copy setup for ${ws.name}.`;
     return;
   }
   throw new Error("Unsupported action.");
@@ -389,7 +413,7 @@ export async function carryOutRoutineStep(deps: EntityStepDeps, turn: Orchestrat
     return;
   }
   if (action === "delete") {
-    const deleted = deps.routines.deleteRoutine(step.target);
+    const deleted = await deps.routines.deleteRoutine(step.target);
     step.undo = deleted.undo;
     step.result = "Deleted routine.";
     return;
@@ -549,7 +573,6 @@ export async function carryOutChatStep(deps: EntityStepDeps, turn: OrchestratorT
       const sent = await deps.chats.sendChat(created.id, step.prompt.trim(), START_SIZE);
       step.ptyId = sent.ptyId;
       step.runId = sent.runId;
-      if (!sent.started) deps.messages.onHumanInput(sent.ptyId, step.prompt.trim());
     } else {
       step.result = `Created chat "${step.name?.trim() || created.title}".`;
     }
@@ -569,7 +592,6 @@ export async function carryOutChatStep(deps: EntityStepDeps, turn: OrchestratorT
     const sent = await deps.chats.sendChat(chatId, step.prompt.trim(), START_SIZE);
     step.ptyId = sent.ptyId;
     step.runId = sent.runId;
-    if (!sent.started) deps.messages.onHumanInput(sent.ptyId, step.prompt.trim());
     if (sent.note) step.result = sent.note;
     return;
   }

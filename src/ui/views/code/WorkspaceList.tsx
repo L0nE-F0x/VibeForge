@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, FileDiff, FolderOpen, FolderPlus, FolderTree, GitBranch, Laptop, MoreHorizontal, Pencil, Plus, Tag, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Copy, FileDiff, FolderOpen, FolderPlus, FolderTree, GitBranch, Laptop, MoreHorizontal, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { SyncShare, Workspace, WorkspaceCategory } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
@@ -55,6 +55,7 @@ export function WorkspaceList({
   onAdd,
   onRemove,
   onBranch,
+  onCopySetup,
 }: {
   /** Code is on screen. Hidden, the list doesn't ask git for each workspace's state every 30 s. */
   active: boolean;
@@ -67,6 +68,8 @@ export function WorkspaceList({
   onRemove: (workspaces: Workspace[]) => Promise<boolean>;
   /** Open a branch of it beside it, as its own workspace. */
   onBranch: (workspace: Workspace) => void;
+  /** Edit what comes along when a copy of this workspace is made. */
+  onCopySetup: (workspace: Workspace) => void;
 }) {
   const t = useT();
   const live = useLive().data ?? [];
@@ -318,6 +321,7 @@ export function WorkspaceList({
   const workspaceItems = (workspace: Workspace): MenuEntry[] => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
     { label: t("code.openBranch"), icon: GitBranch, onSelect: () => onBranch(workspace) },
+    { label: t("code.copySetup"), icon: Copy, onSelect: () => onCopySetup(workspace) },
     ...syncItems(workspace),
     { label: t("common.rename"), icon: Pencil, onSelect: () => startRename(workspace.id) },
     "sep",

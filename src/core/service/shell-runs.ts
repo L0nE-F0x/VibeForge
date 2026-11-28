@@ -1,6 +1,7 @@
 import path from "node:path";
 import { programOf } from "../engines.js";
 import { allocateRunDir } from "../runs.js";
+import { isRunInCopy, removeRunSnapshots, takeStartSnapshot } from "../snapshots.js";
 import { dirtyFiles } from "../vcs.js";
 import { BLIP_MS } from "./types.js";
 import type { ServiceCore } from "./core.js";
@@ -76,12 +77,25 @@ export class ShellRecorder {
     const title = `${row.label} · ${workspace?.name ?? (path.basename(cwd) || cwd)}`;
     const { id, dir } = allocateRunDir(this.core.options.dataRoot, started, title);
     let gitStart: string | null = null;
-    try {
-      gitStart = await this.core.options.host.gitHead(cwd);
-      this.core.gitAtStart.set(id, await this.core.options.host.snapshotGit(cwd, gitStart));
-    } catch {
-      /* not a repo, or git is slow; the run is recorded without */
-    }
+    const captureStartGit = async () => {
+      try {
+        gitStart = await this.core.options.host.gitHead(cwd);
+        this.core.gitAtStart.set(id, await this.core.options.host.snapshotGit(cwd, gitStart));
+      } catch {
+        /* not a repo, or git is slow; the run is recorded without */
+      }
+    };
+    const captureStartSnapshot = async () => {
+      if (isRunInCopy(cwd, this.core.options.dataRoot)) return;
+      await takeStartSnapshot({
+        cwd,
+        runId: id,
+        runDir: dir,
+        dataRoot: this.core.options.dataRoot,
+        onWarn: (message) => this.core.options.host.logWarn?.(message),
+      });
+    };
+    await Promise.all([captureStartGit(), captureStartSnapshot()]);
     this.core.dirtyAtStart.set(id, dirtyFiles(cwd).catch(() => null));
     this.core.store.saveRun({
       id,
@@ -108,7 +122,8 @@ export class ShellRecorder {
       error: null,
       changes: null,
       gitStart,
-      continuedFrom: null,
+      ...this.takeContinue(ptyId, row.id, session.paneId ?? null),
+      ...(session.paneId ? { paneId: session.paneId } : {}),
     });
     try {
       await this.core.options.host.record(ptyId, dir);
@@ -126,6 +141,23 @@ export class ShellRecorder {
     this.core.emit("runs", "live");
   }
 
+  /**
+   * The run Continue its session typed this shell's CLI in for, once (only the CLI it reopens), with
+   * the session it reopened. A CLI the person typed in themselves instead lets the pane's offer go.
+   */
+  private takeContinue(ptyId: string, engineId: string, paneId: string | null): { continuedFrom: string | null; resumeArgs?: string[] } {
+    const runId = this.core.shellContinues.get(ptyId);
+    this.core.shellContinues.delete(ptyId);
+    const previous = runId ? this.core.store.getRun(runId) : null;
+    if (!runId || previous?.engine !== engineId) {
+      if (paneId) this.core.settleCutOffInPane(paneId);
+      return { continuedFrom: null };
+    }
+    this.core.settleCutOff([runId]);
+    const exact = this.core.exactResume(previous);
+    return { continuedFrom: runId, ...(exact ? { resumeArgs: exact } : {}) };
+  }
+
   private async endShellRun(ptyId: string, runId: string): Promise<void> {
     try {
       await this.core.options.host.record(ptyId, null);
@@ -136,14 +168,15 @@ export class ShellRecorder {
     const session = this.core.live.get(ptyId);
     if (session?.runId === runId) this.core.live.set(ptyId, { ...session, runId: null });
     await this.core.finishRun(runId, { exitCode: null, signal: null, status: "exited" });
-    this.dropBlip(runId);
+    await this.dropBlip(runId);
   }
 
-  private dropBlip(runId: string): void {
+  private async dropBlip(runId: string): Promise<void> {
     const run = this.core.store.getRun(runId);
     if (!run?.endedAt || run.stopRequested) return;
     const lasted = Date.parse(run.endedAt) - Date.parse(run.startedAt);
     if (lasted >= BLIP_MS || (run.changes && run.changes !== "No changes")) return;
+    await removeRunSnapshots(run);
     this.core.store.deleteRun(run);
     this.core.emit("runs");
   }

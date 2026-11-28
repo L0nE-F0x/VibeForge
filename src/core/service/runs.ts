@@ -9,6 +9,17 @@ import { repairBlankCapture } from "../restore-screen.js";
 import { runMarkdown } from "../run-markdown.js";
 import { compressRun, folderBytes, hasRunFile, planCleanup, readRunText } from "../run-storage.js";
 import { grokHome, museHome, readGrokPrompts, readMusePrompts } from "../session-prompts.js";
+import {
+  checkRunRestoreAvailability,
+  getRunRestoreAvailability,
+  previewRunRestore,
+  removeRunSnapshots,
+  restoreRunFiles,
+  sweepRunSnapshots,
+  type RestorePick,
+  type RunRestorePreview,
+  type RunRestoreResult,
+} from "../snapshots.js";
 import type { RunQuery } from "../store.js";
 import type { RunMeta } from "../types.js";
 import { type Launched, REVIEW_ORIGINS, type RunBundle, type RunHit, type RunUpkeep, type RunView, type StorageSummary, type TermSize, TWO_DAYS_MS } from "./types.js";
@@ -59,7 +70,7 @@ export class RunDesk {
     const files: RunFiles = run.dir && isDirectory(run.dir)
       ? readRunFiles(run.dir)
       : { preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "", patchSaved: false };
-    return { run: this.core.view(run), files };
+    return { run: this.core.view(run), files, restore: getRunRestoreAvailability(run, this.core.options.dataRoot, files.git) };
   }
 
   /** The run plus its screen, transcript and, for a typed Grok or Muse, the prompts it was given. */
@@ -86,7 +97,28 @@ export class RunDesk {
         /* the prompt tab explains that none was handed over */
       }
     }
-    return { ...bundle, files };
+    const restore = await checkRunRestoreAvailability(bundle.run, this.core.options.dataRoot, files.git);
+    return { ...bundle, files, restore };
+  }
+
+  /** Preview which files from this run can be put back and which will be left alone. */
+  async previewRestore(id: string): Promise<RunRestorePreview> {
+    await this.core.lateSnapshots;
+    const run = this.core.store.getRun(id);
+    return previewRunRestore(run, this.core.options.dataRoot, this.core.store.allRuns());
+  }
+
+  /**
+   * Put back exactly the files the person confirmed in the preview (`picks`), where still as the
+   * preview found them, keeping an Undo token for those exact files.
+   */
+  async restoreRun(id: string, picks: readonly RestorePick[]): Promise<RunRestoreResult> {
+    await this.core.lateSnapshots;
+    const run = this.core.store.getRun(id);
+    const { result, undoData } = await restoreRunFiles(run, this.core.options.dataRoot, picks, this.core.store.allRuns());
+    const undo = undoData ? this.core.keepRestoreForUndo(undoData) : null;
+    if (result.restored.length > 0) this.core.emit("workspaces");
+    return { ...result, undo };
   }
 
   markRunOpened(id: string, opened = true): void {
@@ -122,6 +154,9 @@ export class RunDesk {
       if (followUp) throw new Error("That session is still closing.");
       return { runId: id, ptyId: still, chatId: run.chatId, taskId: run.taskId };
     }
+    // Already picked back up (Continue all and a pane's button, or a second click): that one, not another.
+    const again = this.core.continuedLive(id);
+    if (again && !followUp) return { ...again, chatId: run.chatId, taskId: run.taskId };
     if (run.chatId && this.core.store.getChat(run.chatId)) {
       const result = followUp ? await this.chats.sendChat(run.chatId, followUp, size) : await this.chats.continueChat(run.chatId, size);
       return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
@@ -247,10 +282,18 @@ export class RunDesk {
       const latest = this.core.store.getRun(run.id);
       if (!latest || latest.status === "running" || this.core.ptyByRun.has(run.id)) continue;
       const freed = rule.maxMb > 0 ? bytes : folderBytes(latest.dir);
+      await removeRunSnapshots(latest);
       this.core.store.deleteRun(latest);
       this.sizes.delete(run.id);
       result.removed += 1;
       result.freed += freed;
+    }
+    // Snapshot refs whose run is gone (deleted outside VibeForge too) or older than 30 days.
+    await this.core.lateSnapshots;
+    try {
+      await sweepRunSnapshots({ dataRoot: this.core.options.dataRoot, getRun: (id) => this.core.store.getRun(id), now: this.core.now() });
+    } catch {
+      /* tried again at the next pass */
     }
     const ended = new Set(runs.map((run) => run.id));
     for (const id of this.sizes.keys()) if (!ended.has(id)) this.sizes.delete(id);

@@ -21,7 +21,7 @@ describe("quitting", () => {
     app.removeAllListeners();
     let release: () => void = () => undefined;
     const supervisorShutdown = vi.fn(() => new Promise<void>((resolve) => (release = resolve)));
-    const service = { prepareShutdown: vi.fn(), whenIdle: async () => undefined, shutdown: vi.fn(), disposeLocalServer: vi.fn(), close: vi.fn() };
+    const service = { lookForSessions: async () => undefined, prepareShutdown: vi.fn(), whenIdle: async () => undefined, shutdown: vi.fn(), disposeLocalServer: vi.fn(), close: vi.fn() };
     const ctx = { log: { warn: vi.fn() }, supervisor: { shutdown: supervisorShutdown }, service, quitting: false } as never;
     const quit = new Quit(ctx, { voice: { dispose: vi.fn() } });
     quit.handleEvents();
@@ -47,7 +47,7 @@ describe("quitting", () => {
     let syncEnded: () => void = () => undefined;
     const sync = { stop: () => new Promise<void>((resolve) => (syncEnded = resolve)) };
     const supervisorShutdown = vi.fn(async () => void steps.push("terminals stopped"));
-    const service = { prepareShutdown: vi.fn(), whenIdle: async () => undefined, shutdown: vi.fn(), disposeLocalServer: vi.fn(), close: vi.fn(async () => void steps.push("closed")) };
+    const service = { lookForSessions: async () => undefined, prepareShutdown: vi.fn(), whenIdle: async () => undefined, shutdown: vi.fn(), disposeLocalServer: vi.fn(), close: vi.fn(async () => void steps.push("closed")) };
     const ctx = { log: { warn: vi.fn() }, supervisor: { shutdown: supervisorShutdown }, service, quitting: false } as never;
     new Quit(ctx, { voice: { dispose: vi.fn() }, sync }).handleEvents();
     willQuit();

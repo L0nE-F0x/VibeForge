@@ -1,11 +1,12 @@
-import { FileDiff, FileText, GitBranch, GitMerge, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { MaestroCopy, Workspace } from "../../shared/api.js";
+import { FileDiff, GitBranch, GitMerge, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { CopyReview, MaestroCopy, Workspace } from "../../shared/api.js";
 import { call, useAppInfo, useEngines, useWorkspaces } from "../api.js";
-import { DiffView } from "../components/RunDetail.js";
+import { CopyApplyButton } from "../components/CopyApply.js";
+import { DiffReview } from "../components/DiffReviewLazy.js";
+import { useCopyPick, type CopyPick } from "../copy-pick.js";
 import { Button, Notice, Sheet } from "../components/ui.js";
 import { applyToast } from "../apply-note.js";
-import { diffFiles } from "../diff-files.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useDeleted, useNav, useToast } from "../state.js";
@@ -15,7 +16,7 @@ import { useAction, useDeleted, useNav, useToast } from "../state.js";
 // one of these clicks.
 
 /** Apply and Discard for a copy, with the toasts a task's copy gives. */
-function useCopyActions(copy: MaestroCopy) {
+function useCopyActions(copy: MaestroCopy, opts?: { skip?: string[]; onStayed?: () => void }) {
   const t = useT();
   const { push } = useToast();
   const deleted = useDeleted();
@@ -24,10 +25,12 @@ function useCopyActions(copy: MaestroCopy) {
   const release = () => copy.openedWorkspaceId && void call("dock.release", copy.openedWorkspaceId).catch(() => undefined);
   const home = useAppInfo().data?.home ?? "";
   const [apply, applying] = useAction(async () => {
-    const result = await call("orchestrator.applyCopy", copy.id);
+    const result = await call("orchestrator.applyCopy", copy.id, opts?.skip);
     const toast = applyToast(t, result, from?.name ?? "", home);
     push(toast.tone, toast.title, toast.body);
-    if (!result.conflicts.length && !result.left) release();
+    // The copy stays: the review shows what is left, with what just went in marked applied.
+    if (result.stayed || result.conflicts.length || result.left) opts?.onStayed?.();
+    else release();
   }, t("tasks.applyFailed"));
   const [discard, discarding] = useAction(async () => {
     const result = await call("orchestrator.discardCopy", copy.id);
@@ -71,11 +74,11 @@ export function CopySheet({ copyId, copies }: { copyId: string; copies: MaestroC
   const engines = useEngines().data ?? [];
   const copy = copies?.find((item) => item.id === copyId);
   const close = () => go({ view: "orchestrator" });
-  const [diff, setDiff] = useState<string | null>(null);
-  const [load, loading] = useAction(async () => setDiff(await call("orchestrator.copyDiff", copyId)), t("orch.diffFailed"));
+  const [review, setReview] = useState<CopyReview | null>(null);
+  const [load, loading] = useAction(async () => setReview(await call("orchestrator.copyDiff", copyId)), t("orch.diffFailed"));
   const present = Boolean(copy);
   useEffect(() => {
-    setDiff(null);
+    setReview(null);
     if (present) void load();
   }, [copyId, present, load]);
   // Applied, discarded, or gone since: back to the conversation.
@@ -83,12 +86,11 @@ export function CopySheet({ copyId, copies }: { copyId: string; copies: MaestroC
   useEffect(() => {
     if (gone) replace({ view: "orchestrator" });
   }, [gone, replace]);
-  const files = useMemo(() => (diff ? diffFiles(diff) : []), [diff]);
-  const box = useRef<HTMLDivElement>(null);
+  const pick = useCopyPick(review?.files);
   if (!copy) return null;
   const engine = engines.find((item) => item.id === copy.engineId)?.label ?? copy.engineId;
   return (
-    <Sheet onClose={close} width={1000} label={t("orch.reviewTitle", { name: copy.name })}>
+    <Sheet onClose={close} width={1060} label={t("orch.reviewTitle", { name: copy.name })}>
       <div className="page-head">
         <GitBranch size={17} className="accent-text" />
         <h1 className="grow truncate">{t("orch.reviewTitle", { name: copy.name })}</h1>
@@ -96,42 +98,25 @@ export function CopySheet({ copyId, copies }: { copyId: string; copies: MaestroC
         <Button variant="ghost" size="sm" icon={X} onClick={close} title={t("common.closeEsc")} />
       </div>
       <div className="page-body vstack" style={{ gap: 14 }}>
-        <CopyNotice copy={copy} engine={engine} />
+        <CopyNotice copy={copy} engine={engine} pick={pick} onStayed={() => void load()} />
         {copy.prompt && <span className="orch-prompt-text">{copy.prompt}</span>}
-        {files.length > 0 && (
-          <div className="diff-files">
-            {files.map((file) => (
-              <button key={file.line} type="button" className="diff-file" onClick={() => box.current?.querySelector(`[data-line="${file.line}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" })}>
-                <FileText size={13} className="faint" />
-                <span className="mono truncate grow">{file.path}</span>
-                {file.added > 0 && <span className="diff-count add">+{file.added}</span>}
-                {file.removed > 0 && <span className="diff-count del">−{file.removed}</span>}
-              </button>
-            ))}
-          </div>
-        )}
-        {diff !== null && (
-          <div ref={box}>
-            <DiffView text={diff} />
-          </div>
-        )}
+        {review !== null && <DiffReview text={review.patch} reviewKey={`copy:${copy.id}`} workspaceId={copy.workspaceId} folder={copy.path} selection={pick.selection} />}
       </div>
     </Sheet>
   );
 }
 
-function CopyNotice({ copy, engine }: { copy: MaestroCopy; engine: string }) {
+function CopyNotice({ copy, engine, pick, onStayed }: { copy: MaestroCopy; engine: string; pick: CopyPick; onStayed: () => void }) {
   const t = useT();
-  const { from, apply, applying, discard, discarding } = useCopyActions(copy);
+  const { from, apply, applying, discard, discarding } = useCopyActions(copy, { skip: pick.skip, onStayed });
+  const workspace = from?.name ?? "";
   return (
     <Notice tone="accent" icon={GitBranch}>
       <div className="hstack wrap">
         <span className="grow">
           <Rich text={t("orch.copyNote", { engine, branch: copy.branch, workspace: from?.name ?? copy.repo })} />
         </span>
-        <Button size="sm" variant="primary" icon={GitMerge} busy={applying} tip={t("orch.applyTip", { workspace: from?.name ?? "" })} onClick={() => void apply()}>
-          {t("tasks.apply", { workspace: from?.name ?? "" })}
-        </Button>
+        <CopyApplyButton pick={pick} workspace={workspace} tip={t("orch.applyTip", { workspace })} busy={applying} onApply={() => void apply()} />
         <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} tip={t("orch.discardTip")} onClick={() => void discard()}>
           {t("orch.discard")}
         </Button>

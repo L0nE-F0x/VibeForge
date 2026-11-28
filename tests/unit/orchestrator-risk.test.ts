@@ -131,6 +131,7 @@ describe("Centralized risk classification and approval policy", () => {
     expect(classifyStepRisk(step({ kind: "start", engineId: "claude", prompt: "" }), context).risk).toBe("low");
     expect(classifyStepRisk(step({ kind: "start", engineId: "claude", branch: "fix-bug", prompt: "Fix it" }), context).risk).toBe("low");
     expect(classifyStepRisk(step({ kind: "workspace", action: "create", name: "new-ws" }), context).risk).toBe("low");
+    expect(classifyStepRisk(step({ kind: "workspace", action: "copy-setup", target: "ws1", options: "folders=node_modules" }), context).risk).toBe("low");
     expect(classifyStepRisk(step({ kind: "workbench", prompt: "browser", target: "http://127.0.0.1:5173" }), context)).toMatchObject({ risk: "low", category: "navigation" });
     expect(classifyStepRisk(step({ kind: "key", target: "pty-normal", prompt: "down" }), context).risk).toBe("low");
     expect(classifyStepRisk(step({ kind: "key", target: "pty-trust", prompt: "yes" }), context).risk).toBe("low");
@@ -149,6 +150,10 @@ describe("Centralized risk classification and approval policy", () => {
       [{ kind: "routine", action: "delete", target: "r1" }, "delete"],
       [{ kind: "chat", action: "delete", target: "c1" }, "delete"],
       [{ kind: "workspace", action: "remove", target: "ws1" }, "delete"],
+      [{ kind: "workspace", action: "copy-setup", target: "ws1", options: "setupCommand=npm i" }, "unsafe-shell"],
+      [{ kind: "workspace", action: "copy-setup", target: "ws1", prompt: "pnpm install" }, "unsafe-shell"],
+      [{ kind: "workspace", action: "copy-setup", target: "ws1", options: "files=**" }, "outward-or-privilege"],
+      [{ kind: "workspace", action: "copy-setup", target: "ws1", options: "folders=secrets" }, "outward-or-privilege"],
       [{ kind: "run", action: "tidy" }, "delete"],
       [{ kind: "shell", prompt: "rm -rf src" }, "unsafe-shell"],
       [{ kind: "verify", branch: "", prompt: "npm test", dirty: 2 }, "in-place-edit"],

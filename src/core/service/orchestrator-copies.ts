@@ -7,7 +7,7 @@ import { isPathInside } from "../places.js";
 import { isSafeId } from "../slug.js";
 import type { Workspace } from "../types.js";
 import { removeWorkspaceRecord } from "../workspaces.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, expectedCopyPath, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
+import { applyCopyFiles, appliedFiles, copyBranch, copyPatch, copyReview, expectedCopyPath, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type CopyReview, type WorkingCopy } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
 import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
@@ -95,7 +95,7 @@ export class MaestroCopies {
    * named for the branch the plan asked for, and its own workspace (not the one Code shows).
    * Copies on distinct repositories can be created in parallel while same-repo git worktree writes serialize cleanly.
    */
-  async make(input: { turnId: string; stepId: string; engineId: string; prompt: string; branch: string; workspace: Workspace }): Promise<MaestroCopy & { openedWorkspaceId: string }> {
+  async make(input: { turnId: string; stepId: string; engineId: string; prompt: string; branch: string; workspace: Workspace }): Promise<MaestroCopy & { openedWorkspaceId: string; setupCommand: string | null; setupNotes: string[] }> {
     const name = cleanBranch(input.branch) || "maestro";
     const id = await this.serial(async () => {
       const picked = await this.freeId(input.workspace.path, name);
@@ -104,8 +104,7 @@ export class MaestroCopies {
     });
     try {
       return await this.perRepo(input.workspace.path, async () => {
-        const made = await createCopy(input.workspace.path, path.join(this.core.options.dataRoot, "worktrees", id), copyBranch(id));
-        const copy: MaestroCopy = {
+        const entry = (made: WorkingCopy): MaestroCopy => ({
           id,
           turnId: input.turnId,
           stepId: input.stepId,
@@ -116,14 +115,32 @@ export class MaestroCopies {
           openedWorkspaceId: null,
           at: this.core.now().toISOString(),
           ...made,
+        });
+        // Kept as soon as git has made it, so a copy that never got its workspace, or whose
+        // files couldn't all be brought in, can still be discarded.
+        const record = (made: WorkingCopy) => {
+          const known = this.copies.find((item) => item.id === id);
+          if (known) Object.assign(known, made);
+          else this.copies.push(entry(made));
+          this.save();
         };
-        // Kept before anything else can fail, so a copy that never got its workspace can still be discarded.
-        this.copies.push(copy);
-        this.save();
+        const { copy: made, setupCommand, warnings } = await prepareCopy({
+          folder: input.workspace.path,
+          target: path.join(this.core.options.dataRoot, "worktrees", id),
+          branch: copyBranch(id),
+          copySetup: input.workspace.copySetup,
+          record,
+        });
+        let copy = this.copies.find((item) => item.id === id);
+        if (!copy) {
+          copy = entry(made);
+          this.copies.push(copy);
+        }
+        for (const warning of warnings) this.core.options.host.logWarn?.(`copy setup: ${warning}`);
         const openedWorkspaceId = this.workspaces.addQuietly(folderInCopy(made, input.workspace.path), `${input.workspace.name} · ${name}`);
         copy.openedWorkspaceId = openedWorkspaceId;
         this.save();
-        return { ...copy, openedWorkspaceId };
+        return { ...copy, openedWorkspaceId, setupCommand, setupNotes: warnings };
       });
     } finally {
       this.reservedIds.delete(id);
@@ -152,25 +169,42 @@ export class MaestroCopies {
     return copyPatch(copy, this.owner(copy.id));
   }
 
+  /** The copy's patch with its list of files, each marked when an earlier Apply brought it in. */
+  review(id: string): Promise<CopyReview> {
+    const copy = this.find(id);
+    return copyReview(copy, this.owner(copy.id));
+  }
+
   /**
-   * Bring the copy's changes into the workspace it came from as uncommitted edits. Its CLI ends
-   * first, as its folder is about to go. A clean apply (or nothing to apply) removes the copy, its
-   * branch and its workspace; with conflicts the copy stays until they're sorted out.
+   * Bring the copy's changes into the workspace it came from as uncommitted edits, leaving out the
+   * files in `skip` (those unticked in the review). A clean apply (or nothing to apply) removes the
+   * copy, its branch and its workspace, ending the CLIs working in it first; with conflicts, or
+   * files left unticked, the copy stays and remembers what was applied. Leaving files in the copy
+   * while a CLI still works there is refused, as a task's copy is: nothing is ended for it.
    */
-  apply(id: string): Promise<ApplyResult> {
+  apply(id: string, skip?: readonly string[]): Promise<ApplyResult> {
     return this.serial(async () => {
       const copy = this.find(id);
       if (!this.core.workspaceById(copy.workspaceId)) throw new Error("That workspace is gone.");
       if (!ownedCopyPath(this.owner(copy.id), copy.path)?.real) throw new Error("This copy is not in VibeForge's worktrees folder, so it was left alone.");
       if (!(await this.trusted(copy))) throw new Error("This copy names another repository, so it was left alone.");
+      if (skip?.length && this.liveIn(copy).length) {
+        const plan = await applyCopyFiles(copy, await copyPatch(copy, this.owner(copy.id)), { skip, dryRun: true });
+        if (plan.result.stayed) throw new Error("Stop the CLI working in this copy before applying only some of its files.");
+      }
       await this.endIn(copy);
-      const result = await applyToWorkspace(copy, await copyPatch(copy, this.owner(copy.id)));
-      if (result.conflicts.length) return result;
+      const { result, applied } = await applyCopyFiles(copy, await copyPatch(copy, this.owner(copy.id)), { skip });
+      const stays = (extra?: Partial<ApplyResult>) => {
+        copy.applied = applied;
+        this.save();
+        return { ...result, ...extra };
+      };
+      if (result.conflicts.length || result.stayed) return stays();
       // Files git ignores that only live in the copy keep it, with its workspace, until it is discarded.
       const left = await leftInCopy(copy);
       if (left.length) {
         if (result.pulled) this.core.emit("workspaces");
-        return { ...result, left: { folder: copy.path, files: left } };
+        return stays({ left: { folder: copy.path, files: left } });
       }
       await removeCopy(copy, this.owner(copy.id));
       this.forget(copy);
@@ -246,11 +280,16 @@ export class MaestroCopies {
     return repo !== null && repo === path.resolve(copy.repo);
   }
 
-  /** End every terminal working in the copy (its CLI, a shell opened there), and let each finish its run. */
-  private async endIn(copy: MaestroCopy): Promise<void> {
-    const inside = [...this.core.live.values()].filter(
+  /** Every terminal working in the copy: its CLI, a shell opened there. */
+  private liveIn(copy: MaestroCopy) {
+    return [...this.core.live.values()].filter(
       (session) => (copy.openedWorkspaceId !== null && session.workspaceId === copy.openedWorkspaceId) || isPathInside(copy.path, session.programCwd || session.cwd),
     );
+  }
+
+  /** End every terminal working in the copy, and let each finish its run. */
+  private async endIn(copy: MaestroCopy): Promise<void> {
+    const inside = this.liveIn(copy);
     for (const session of inside) await this.core.killPty(session.ptyId);
     await Promise.all(inside.map((session) => this.core.waitForExit(session.ptyId, END_MS)));
   }
@@ -261,6 +300,8 @@ function readCopy(value: unknown): MaestroCopy | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
   const text = (key: string) => (typeof item[key] === "string" ? (item[key] as string) : "");
+  const seeded = Array.isArray(item.seeded) ? item.seeded.filter((s): s is string => typeof s === "string") : [];
+  const applied = appliedFiles(item.applied);
   const copy: MaestroCopy = {
     id: text("id"),
     turnId: text("turnId"),
@@ -275,6 +316,8 @@ function readCopy(value: unknown): MaestroCopy | null {
     branch: text("branch"),
     base: text("base"),
     repo: text("repo"),
+    ...(seeded.length ? { seeded } : {}),
+    ...(applied.length ? { applied } : {}),
   };
   return copy.id && copy.workspaceId && copy.path && copy.branch && copy.base && copy.repo ? copy : null;
 }

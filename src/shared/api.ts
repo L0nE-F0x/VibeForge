@@ -1,19 +1,29 @@
 // The contract between the renderer and the main process. The renderer calls
 // `call("agents.list")`; the main process implements every key of DeskMethods.
+import type { MemoryProposal } from "./memory.js";
 import type { ComputerFacts } from "./computer.js";
 import type { FileNode } from "../core/files.js";
 import type { RunQuery } from "../core/store.js";
 import type {
   AgentInput,
   ChatView,
+  CutOffRun,
   Launched,
   Queued,
   RoutineInput,
   RoutineView,
   RunBundle,
   RunHit,
+  RunRestoreAvailability,
+  RunRestorePreview,
+  RunRestoreResult,
+  RunRestoreUndoResult,
   RunUpkeep,
   RunView,
+  LeftAloneReason,
+  RestoreFileAction,
+  RestoreItem,
+  RestorePick,
   SchedulePreview,
   SendResult,
   SkillInput,
@@ -45,6 +55,7 @@ import type {
   OrchestratorSettings,
   ComputerUseSettings,
   ComputerUseGrant,
+  CutOff,
   SoundSettings,
   TalkState,
   TaskStatus,
@@ -54,6 +65,7 @@ import type {
   LibraryKind,
   VoiceSettings,
   WorkspaceCategory,
+  WorkspaceCopySetup,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
 import type { LocalModelInfo, LocalRuntimeStatus, LocalServerKind, LocalServerProbe } from "../core/local.js";
@@ -102,9 +114,9 @@ export type {
   StepIssue,
   StepPatch,
 };
-import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
+import type { ApplyResult, CopyReview, ReviewFile, WorkingCopy } from "../core/worktrees.js";
 
-export type { ApplyResult, WorkingCopy, BranchList };
+export type { ApplyResult, CopyReview, ReviewFile, WorkingCopy, BranchList };
 import type { Deleted } from "../core/team-service.js";
 
 export type { Deleted };
@@ -138,8 +150,16 @@ export type {
   RunBundle,
   RunHit,
   RunQuery,
+  RunRestoreAvailability,
+  RunRestorePreview,
+  RunRestoreResult,
+  RunRestoreUndoResult,
   RunUpkeep,
   RunView,
+  LeftAloneReason,
+  RestoreFileAction,
+  RestoreItem,
+  RestorePick,
   Schedule,
   SchedulePreview,
   StorageSummary,
@@ -172,7 +192,8 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
+export type { Workspace, WorkspaceCategory, WorkspaceCopySetup, RoutineRunResult, RunOrigin, RunStatus, PaneLaunch, UnreadableFile, CutOff } from "../core/types.js";
+export type { CutOffRun } from "../core/team-service.js";
 
 /** Partial settings patch supporting nested partial updates for `companion` and `local`. */
 export type SettingsPatch = Partial<Omit<Settings, "companion" | "local">> & {
@@ -214,7 +235,9 @@ export type DeskNotice =
   | { id: "host-stopped"; terminals: number; runIds: string[] }
   | { id: "host-stalled" }
   | { id: "host-answering" }
-  | { id: "errors"; count: number };
+  | { id: "errors"; count: number }
+  /** An agent proposed a line for its memory; it waits on the agent's Memory tab. */
+  | { id: "memory-proposed"; agentId: string; agentName: string; note: string; flagged: boolean; waiting: number };
 
 export interface UpdateInfo {
   current: string;
@@ -402,7 +425,8 @@ export interface DeskMethods {
   "app.computer": () => ComputerFacts;
   "app.pathExists": (target: string) => boolean;
   "app.toggleDevTools": () => void;
-  "app.restart": () => void;
+  /** Restart VibeForge; `update` says it is to finish an update, so cut-off CLIs reopen by themselves. */
+  "app.restart": (opts?: { reason?: "update" }) => void;
   "app.copyText": (text: string) => void;
   /** Bring the window forward, so a transcript dictated from another desktop is on screen. */
   "app.focus": () => void;
@@ -475,7 +499,7 @@ export interface DeskMethods {
   "workspaces.remove": (id: string) => Deleted;
   "workspaces.select": (id: string) => void;
   "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
-  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }) => WorkspaceFile;
+  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string; categories?: string[]; copySetup?: WorkspaceCopySetup | null }) => WorkspaceFile;
   "workspaces.addCategory": (name: string) => { file: WorkspaceFile; category: WorkspaceCategory };
   "workspaces.renameCategory": (id: string, name: string) => WorkspaceFile;
   "workspaces.moveCategory": (id: string, toIndex: number) => WorkspaceFile;
@@ -497,6 +521,14 @@ export interface DeskMethods {
   "agents.delete": (id: string) => Deleted;
   "agents.readMemory": (id: string) => string;
   "agents.writeMemory": (id: string, text: string) => void;
+  /** Lines the agent proposed for its memory (`vibeforge remember`), waiting for the person; never sent to a CLI. */
+  "agents.proposals": (id: string) => MemoryProposal[];
+  /** How many proposed lines wait, per agent id (agents with none left out). */
+  "agents.proposalCounts": () => Record<string, number>;
+  /** Keep proposals: each goes into memory.md as a dated bullet. Gives the lines added. */
+  "agents.keepProposals": (id: string, proposalIds: string[]) => { lines: string[] };
+  /** Drop proposals, undone with undo.delete. */
+  "agents.dropProposals": (id: string, proposalIds: string[]) => Deleted;
 
   "skills.list": () => Skill[];
   "skills.save": (input: SkillInput) => Skill;
@@ -511,6 +543,10 @@ export interface DeskMethods {
   "routines.runNow": (id: string, size?: TermSize, now?: boolean) => Launched | Queued;
   "routines.cancelWait": (id: string) => void;
   "routines.preview": (schedule: Schedule) => SchedulePreview;
+  /** Bring an isolated routine copy's changes into its folder as uncommitted edits. */
+  "routines.applyCopy": (id: string) => ApplyResult;
+  /** Throw an isolated routine's copy away. */
+  "routines.discardCopy": (id: string) => Deleted;
 
   "tasks.list": () => TaskView[];
   "tasks.save": (input: TaskInput) => TaskView;
@@ -523,8 +559,14 @@ export interface DeskMethods {
   "tasks.continue": (id: string, size?: TermSize) => Launched;
   "tasks.stop": (id: string) => TaskView;
   "tasks.setStatus": (id: string, status: TaskStatus) => TaskView;
-  /** Bring an isolated task's changes into its workspace as uncommitted edits. */
-  "tasks.applyCopy": (id: string) => ApplyResult;
+  /** Everything an isolated task's copy changed since it started, as a patch, with its list of files as Apply sees them. */
+  "tasks.copyDiff": (id: string) => CopyReview;
+  /**
+   * Bring an isolated task's changes into its workspace as uncommitted edits, leaving out `skip`
+   * (the files unticked in the review; both names of a rename). Without it, files an earlier
+   * Apply brought in are left out.
+   */
+  "tasks.applyCopy": (id: string, skip?: string[]) => ApplyResult;
   /** Throw an isolated task's copy away. */
   "tasks.discardCopy": (id: string) => Deleted;
 
@@ -540,8 +582,10 @@ export interface DeskMethods {
   "chats.stop": (id: string) => void;
 
   /** A shell in the workspace; `command` is typed at its prompt with Enter once the shell is ready (a CLI the person clicked to start). */
-  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize) => { ptyId: string };
-  "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize) => Launched;
+  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string; paneId?: string; continueRun?: string } & TermSize) => { ptyId: string; reopenFailed?: string };
+  /** Type the command that reopens a cut-off run's session into this Code shell, at its prompt. */
+  "code.reopen": (ptyId: string, runId: string) => void;
+  "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; paneId?: string; continueRun?: string } & TermSize) => Launched;
 
   "runs.list": (query?: RunQuery) => RunView[];
   "runs.inbox": () => RunView[];
@@ -550,12 +594,22 @@ export interface DeskMethods {
   "runs.markAllOpened": () => void;
   "runs.stop": (id: string) => void;
   "runs.continue": (id: string, size?: TermSize) => Launched & { chatId: string | null; taskId: string | null };
+  /** What the last close of VibeForge cut off, to offer back; null when nothing is left to offer. */
+  "runs.cutOff": () => { reason: CutOff; at: string; runs: CutOffRun[] } | null;
+  /** Stop offering these (picked back up another way, or let go). */
+  "runs.cutOffSettle": (runIds: string[]) => void;
   /** Runs whose title, prompt, transcript or folder hold the words typed, best first, with a snippet. */
   "runs.search": (text: string, limit?: number) => RunHit[];
   /** `saved` is the patch frozen when the run ended. `now` reads the folder as it is. */
   "runs.diff": (id: string, source?: "saved" | "now") => string;
   /** A finished run as Markdown for an issue or a pull request (src/core/run-markdown.ts). */
   "runs.markdown": (id: string) => string;
+  /** Preview which files will be restored vs. left alone if putting files back as before this run. */
+  "runs.restorePreview": (id: string) => RunRestorePreview;
+  /** Put back exactly the files confirmed from the preview (path and what was on disk then); anything changed since is left alone. */
+  "runs.restore": (id: string, picks: RestorePick[]) => RunRestoreResult;
+  /** Put the run's end state back for the exact files restored by `runs.restore`, saying which it left alone. */
+  "runs.undoRestore": (token: string) => RunRestoreUndoResult;
 
   /** Where VibeForge's disk space goes. */
   "storage.summary": () => StorageSummary;
@@ -593,8 +647,8 @@ export interface DeskMethods {
   "orchestrator.editStep": (turnId: string, stepId: string, patch: StepPatch) => void;
   "orchestrator.removeStep": (turnId: string, stepId: string) => void;
   /** A step's copy: its changes, Apply into the workspace it came from, or Discard (undone with undo.delete). */
-  "orchestrator.copyDiff": (copyId: string) => string;
-  "orchestrator.applyCopy": (copyId: string) => ApplyResult;
+  "orchestrator.copyDiff": (copyId: string) => CopyReview;
+  "orchestrator.applyCopy": (copyId: string, skip?: string[]) => ApplyResult;
   "orchestrator.discardCopy": (copyId: string) => Deleted;
 
   /** Sync between machines: this machine, the paired ones, what is shared, offered and waiting for a choice. */
@@ -649,8 +703,8 @@ export interface DeskMethods {
   "pty.write": (ptyId: string, data: string) => void;
   "pty.send": (ptyId: string, text: string) => void;
 
-  /** Send to…: a pane's last answer, selection or changes, left as a draft in another pane. False when there was nothing to send. */
-  "talk.sendDraft": (fromPty: string, toPty: string, what: "reply" | "selection" | "changes", selection?: string) => { sent: boolean };
+  /** Send to…: a pane's last answer, selection, changes, or review notes, left as a draft in another pane. False when there was nothing to send. */
+  "talk.sendDraft": (fromPty: string | null, toPty: string, what: "reply" | "selection" | "changes" | "notes", selection?: string) => { sent: boolean };
   /**
    * Review with…: once the author's turn ends, the reviewer reads its changes and the review goes
    * back to it. `changes` is false when the author hasn't changed anything yet: it waits for its next turn.

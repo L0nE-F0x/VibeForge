@@ -65,6 +65,11 @@ export class MessageDesk {
     this.handed = new HandedTasks(core, tasks, this.roster, this.delivery, this.answers, this.files, pump);
   }
 
+  /** Whether a task this terminal handed out is still to report back to it. */
+  expectsReport(ptyId: string): boolean {
+    return this.answers.reportingTo(ptyId) > 0;
+  }
+
   close(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -184,11 +189,20 @@ export class MessageDesk {
     });
   }
 
-  /** Send to…: a draft from one pane into another, labelled, for a person to read and send. */
-  async sendDraft(input: { fromPty: string; toPty: string; what: "reply" | "selection" | "changes"; selection?: string }): Promise<{ sent: boolean }> {
-    const from = this.list().find((item) => item.ptyId === input.fromPty);
+  /** Send to…: a draft from one pane into another, or review notes from a diff, for a person to read and send. */
+  async sendDraft(input: { fromPty: string | null; toPty: string; what: "reply" | "selection" | "changes" | "notes"; selection?: string }): Promise<{ sent: boolean }> {
     const to = this.core.live.get(input.toPty);
-    if (!from || !to || !isCodingCli(to)) throw new Error("That CLI isn't running any more.");
+    if (!to || !isCodingCli(to)) throw new Error("That CLI isn't running any more.");
+    if (input.what === "notes") {
+      const text = cleanText(input.selection ?? "");
+      if (!text) return { sent: false };
+      const saved = this.files.saveIfLong("messages", text);
+      const body = saved ? `Review notes saved at ${saved}. Read them first.` : text;
+      await this.core.options.host.send(input.toPty, body, false);
+      return { sent: true };
+    }
+    const from = input.fromPty ? this.list().find((item) => item.ptyId === input.fromPty) : null;
+    if (!from) throw new Error("That CLI isn't running any more.");
     let text = "";
     if (input.what === "selection") text = cleanText(input.selection ?? "");
     else if (input.what === "reply") text = await this.lastAnswer(from);
@@ -250,6 +264,52 @@ export class MessageDesk {
     return watch({ kind, cwd, since: this.nowMs() - 2000, words: cleanText(words).split("\n")[0], signal })
       .then((reply) => (reply?.trim() ? cleanText(reply) : null))
       .catch(() => null);
+  }
+
+  /**
+   * Watches one routine turn until its CLI writes a log answer or goes quiet on screen, then reads
+   * the screen too so callers can tell a finished turn apart from one waiting on a question.
+   */
+  watchRoutineTurn(
+    ptyId: string,
+    opts: {
+      words: string;
+      sent: string;
+      since: number;
+      /** Read the screen only for a quiet spell that began after this (see WaitSpec.quietAfter). */
+      quietAfter?: number;
+      stuckMs?: number;
+      onTurn: (info: { reply: string | null; fromScreen: boolean; screen: string; hasLogReader: boolean }) => void | Promise<void>;
+    },
+  ): () => void {
+    const session = this.core.live.get(ptyId);
+    const engine = session ? this.roster.engineOf(session) : null;
+    const hasLogReader = Boolean(engine && this.core.options.host.watchReply && replyLogFor(engine.id, engine.bin));
+    let cancelled = false;
+    const stopWatch = this.answers.watchAnswer(
+      ptyId,
+      {
+        words: opts.words,
+        sent: opts.sent,
+        deadline: Number.MAX_SAFE_INTEGER,
+        ...(opts.stuckMs ? { stuckMs: opts.stuckMs } : {}),
+        ...(opts.quietAfter !== undefined ? { quietAfter: opts.quietAfter } : {}),
+        internal: true,
+        done: (answered) => {
+          if (cancelled || !answered) return;
+          void (this.core.options.host.screen?.(ptyId).catch(() => "") ?? Promise.resolve("")).then((screen) => {
+            if (cancelled) return;
+            void opts.onTurn({ reply: answered.reply, fromScreen: answered.fromScreen, screen, hasLogReader });
+          });
+        },
+        dropped: () => undefined,
+      },
+      opts.since,
+    );
+    return () => {
+      cancelled = true;
+      stopWatch();
+    };
   }
 
   private async screenOf(ptyId: string): Promise<string> {

@@ -39,7 +39,7 @@ function agent(id: string, name = id): Agent {
 }
 
 function routine(id: string, agentId: string): Routine {
-  return { id, name: id, agentId, enabled: true, schedule: { kind: "every", minutes: 5 }, prompt: "Check.", notify: false, lastFiredAt: null, lastMissedAt: null, shareCheckout: false };
+  return { id, name: id, agentId, enabled: true, schedule: { kind: "every", minutes: 5 }, prompt: "Check.", notify: false, timeoutMinutes: 120, isolated: false, copy: null, lastFiredAt: null, lastMissedAt: null, skippedSlots: null, shareCheckout: false };
 }
 
 function store() {

@@ -40,6 +40,25 @@ const ISSUE_KEYS = {
 const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", read: "orch.read", apply: "orch.applyStep", discard: "orch.discard" };
 
 /**
+ * What a copy-setup step changes (copySetupChange in src/shared/copy-setup.ts), line by line, so
+ * Go is pressed knowing the command every new copy runs and what it brings along. While the plan
+ * can still be changed the command is in the box below instead.
+ * @param {NonNullable<PhoneStep["copySetup"]>} change
+ * @param {boolean} withCommand
+ */
+function copySetupLines(change, withCommand) {
+  /** @param {string[]} items */
+  const list = (items) => (items.length ? items.join("  ") : t("orch.copyNone"));
+  /** @type {Array<[string, string, boolean]>} */
+  const rows = [];
+  if (change.files !== undefined) rows.push([t("orch.copyFiles"), change.files === null ? t("orch.copyFilesDefault") : list(change.files), Boolean(change.files?.length)]);
+  if (change.folders !== undefined) rows.push([t("orch.copyFolders"), list(change.folders), change.folders.length > 0]);
+  if (change.worktreeInclude !== undefined) rows.push([t("orch.copyInclude"), change.worktreeInclude ? t("orch.copyIncludeOn") : t("orch.copyIncludeOff"), false]);
+  if (withCommand && change.command !== undefined) rows.push([t("orch.copyCommand"), change.command || t("orch.copyRemoved"), Boolean(change.command)]);
+  return el("dl", { class: "orch-copy-setup" }, ...rows.map(([label, value, code]) => el("div", {}, el("dt", {}, label), el("dd", code ? { class: "mono" } : {}, value))));
+}
+
+/**
  * What a non-start step will do, matching `otherStepKey` in src/ui/views/Orchestrator.tsx.
  * @param {PhoneStep} step
  */
@@ -58,6 +77,7 @@ function otherStepKey(step) {
     if (act === "rename") return "orch.workspaceRename";
     if (act === "remove") return "orch.workspaceRemove";
     if (act === "move") return "orch.workspaceMove";
+    if (act === "copy-setup") return "orch.workspaceCopySetup";
     return "orch.makeWorkspace";
   }
   if (step.kind === "agent") {
@@ -220,6 +240,7 @@ function stepNode(turn, step, editable) {
           ? [step.prompt, step.asked].filter(Boolean).join(" · ")
           : step.asked || step.name || step.prompt;
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(otherStepKey(step))), el("span", { class: "orch-target" }, what)));
+    if (step.copySetup) main.append(copySetupLines(step.copySetup, !editable));
   } else {
     const target = orch.running.find((item) => item.ptyId === step.target);
     const kindKey = /** @type {Record<string, string>} */ (KIND_KEYS)[step.kind] || "orch.close";
@@ -227,6 +248,7 @@ function stepNode(turn, step, editable) {
   }
   // Show prompt editor for steps carrying an instruction, brief, body, or message.
   const hasPrompt =
+    (editable && Boolean(step.copySetup)) ||
     step.kind === "start" ||
     step.kind === "tell" ||
     step.kind === "shell" ||
@@ -372,7 +394,14 @@ function branchField(turn, step, value) {
  * @param {string} value
  */
 function promptField(turn, step, value) {
-  const box = el("textarea", { class: "orch-prompt", "data-field": "prompt", "aria-label": t("orch.prompt") });
+  // A copy-setup step's prompt is the setup command every new copy runs.
+  const command = Boolean(step.copySetup);
+  const box = el("textarea", {
+    class: command ? "orch-prompt mono" : "orch-prompt",
+    "data-field": "prompt",
+    "aria-label": t(command ? "orch.copyCommand" : "orch.prompt"),
+    placeholder: command ? t("orch.copyCommandUnchanged") : null,
+  });
   box.value = value;
   box.addEventListener("input", () => sizePrompt(box));
   box.addEventListener("blur", () => {

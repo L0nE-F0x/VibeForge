@@ -1,12 +1,15 @@
-import { ArrowRightLeft, CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, FileDiff, FolderPlus, GitBranch, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
-import type { TaskStatus, TaskView } from "../../shared/api.js";
+import type { CopyReview, TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useAppInfo, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
+import { CopyApplyButton } from "../components/CopyApply.js";
+import { DiffReview } from "../components/DiffReviewLazy.js";
+import { useCopyPick } from "../copy-pick.js";
 import { LiveTerminal } from "../components/Terminal.js";
 import { LoadFailed, UnreadableFiles, useUnreadableOf } from "../components/LoadState.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, toolsWanted, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
-import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
+import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, Skeleton, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { matchesQuery, nameOrder, runWentWrong, timeOf, type ListSpec } from "../list-view.js";
 import { Rich } from "../i18n/Rich.js";
 import { deleteEach, useAction, useConfirm, useDeleted, useDeletedMany, useDropMissing, useNav, useToast, type Route } from "../state.js";
@@ -357,11 +360,26 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const [stop, stopping] = useAction(async () => task && call("tasks.stop", task.id), t("tasks.stopFailed"));
   const [setStatus] = useAction(async (status: TaskStatus) => task && call("tasks.setStatus", task.id, status), t("tasks.moveFailed"));
   const home = useAppInfo().data?.home ?? "";
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState<CopyReview | null>(null);
+  const [loadReview, loadingReview] = useAction(async (taskId: string) => {
+    setReview(await call("tasks.copyDiff", taskId));
+  }, t("run.diffFailed"));
+  const copyPath = task?.copy?.path ?? null;
+  const lastRunId = task?.lastRun?.id ?? null;
+  useEffect(() => {
+    setReview(null);
+    if (reviewing && task?.id && copyPath && !live) void loadReview(task.id);
+  }, [reviewing, task?.id, copyPath, lastRunId, live, loadReview]);
+  const pick = useCopyPick(review?.files);
+
   const [applyCopy, applying] = useAction(async () => {
     if (!task || !workspace) return;
-    const result = await call("tasks.applyCopy", task.id);
+    const result = await call("tasks.applyCopy", task.id, pick.skip);
     const toast = applyToast(t, result, workspace.name, home);
     push(toast.tone, toast.title, toast.body);
+    // The copy stays: the review shows what is left, with what just went in marked applied.
+    if (reviewing && (result.stayed || result.conflicts.length || result.left)) void loadReview(task.id);
   }, t("tasks.applyFailed"));
   // Discarding happens at once, with Undo on the toast, as deleting does. Its button only shows
   // while no CLI is working in the copy, so nothing running is stopped by it.
@@ -394,7 +412,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const ended = Boolean(task && (task.status === "review" || task.status === "done") && !live);
 
   return (
-    <Sheet onClose={onClose} width={live ? 1100 : 780} label={task ? task.title : t("tasks.new")}>
+    <Sheet onClose={onClose} width={live ? 1100 : reviewing ? 1060 : 780} label={task ? task.title : t("tasks.new")}>
       <div className="page-head">
         <KanbanSquare size={17} className="accent-text" />
         <h1 className="grow truncate">{task ? task.title : t("tasks.new")}</h1>
@@ -514,9 +532,10 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
               </span>
               {!live && (
                 <>
-                  <Button size="sm" variant="primary" icon={GitMerge} busy={applying} tip={t("tasks.applyTip")} onClick={() => void applyCopy()}>
-                    {t("tasks.apply", { workspace: workspace?.name ?? "" })}
+                  <Button size="sm" icon={FileDiff} pressed={reviewing} onClick={() => setReviewing((was) => !was)}>
+                    {t("orch.review")}
                   </Button>
+                  <CopyApplyButton pick={pick} workspace={workspace?.name ?? ""} tip={t("tasks.applyTip")} busy={applying} onApply={() => void applyCopy()} />
                   <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} onClick={() => void discardCopy()}>
                     {t("tasks.discardCopy")}
                   </Button>
@@ -524,6 +543,13 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
               )}
             </div>
           </Notice>
+        )}
+        {reviewing && task?.copy && task.copyOwned && !live && (
+          loadingReview && review === null ? (
+            <Skeleton rows={4} />
+          ) : review !== null ? (
+            <DiffReview text={review.patch} reviewKey={`task:${task.id}`} workspaceId={task.workspaceId} folder={task.copy.path} selection={pick.selection} />
+          ) : null
         )}
         <Field label={t("tasks.fieldTitle")}>
           <Input autoFocus={!task} value={title} placeholder={t("tasks.titlePlaceholder")} onChange={(event) => setTitle(event.target.value)} />

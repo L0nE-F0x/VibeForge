@@ -4,7 +4,7 @@ import { cwdAllowed } from "../places.js";
 import { replyLogFor } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
-import type { TalkState } from "../types.js";
+import type { TalkState, Task } from "../types.js";
 import { isGitRepo } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
@@ -340,9 +340,31 @@ export class HandedTasks {
     return { started, failed };
   }
 
+  /**
+   * The terminal that handed `task` out: as noted when it did, or, after a restart forgot that, the
+   * live CLI whose run picks up the session that did (Continue keeps the chain in `continuedFrom`).
+   */
+  private handedBy(task: Task): string | null {
+    const noted = this.handed.get(task.id);
+    if (noted) return noted;
+    if (!task.askedBy || !task.sourceRunId) return null;
+    for (const session of this.core.live.values()) {
+      let runId = session.runId;
+      for (let step = 0; runId && step < 50; step += 1) {
+        if (runId === task.sourceRunId) {
+          this.handed.set(task.id, session.ptyId);
+          return session.ptyId;
+        }
+        runId = this.core.store.getRun(runId)?.continuedFrom ?? null;
+      }
+    }
+    return null;
+  }
+
   /** A person executed a handed-out task from the board: it reports to the CLI that handed it out all the same. */
   adoptStarted(taskId: string, ptyId: string): void {
-    const asker = this.handed.get(taskId) ?? null;
+    const task = this.core.store.getTask(taskId);
+    const asker = task ? this.handedBy(task) : null;
     if (!asker || !this.core.live.has(asker)) return;
     if (this.proposed.delete(taskId)) this.core.emit("live");
     this.watchReport(taskId, ptyId, asker, {});
@@ -359,9 +381,9 @@ export class HandedTasks {
     // By id, else by title: of tasks with that title, the one this CLI handed out (another CLI's may share it).
     const byId = this.core.store.getTask(input.task);
     const titled = byId ? [] : this.core.store.listTasks().filter((item) => item.title === input.task);
-    const task = byId ?? titled.find((item) => input.fromPty && this.handed.get(item.id) === input.fromPty) ?? titled[0] ?? null;
+    const task = byId ?? titled.find((item) => input.fromPty && this.handedBy(item) === input.fromPty) ?? titled[0] ?? null;
     if (!task) return { ok: false, error: `No task called "${input.task}".` };
-    if (!input.fromPty || this.handed.get(task.id) !== input.fromPty) return { ok: false, error: "Only the CLI that handed this task out can apply it. A person can apply it from the task in VibeForge." };
+    if (!input.fromPty || this.handedBy(task) !== input.fromPty) return { ok: false, error: "Only the CLI that handed this task out can apply it. A person can apply it from the task in VibeForge." };
     if (!task.copy) return { ok: false, error: "This task has no changes of its own to apply." };
     try {
       const live = task.runIds.at(-1) ? this.core.ptyByRun.get(task.runIds.at(-1)!) : undefined;
@@ -397,10 +419,13 @@ export class HandedTasks {
     const task = this.core.store.getTask(taskId);
     if (!to || !isCodingCli(to) || !task || this.delivery.isStopped(asker) || this.delivery.isStopped(taskPty)) return false;
     // Read from the screen although VibeForge reads this CLI's log: nothing came into the log, so
-    // it never got going (a trust or permission question on screen, most likely).
+    // it never got going (a trust or permission question on screen, most likely). The same when it
+    // never moved at all.
     const session = this.core.live.get(taskPty);
     const engine = session ? this.roster.engineOf(session) : null;
-    const waiting = Boolean(!ended && answered?.fromScreen && engine && replyLogFor(engine.id, engine.bin));
+    // A CLI that never moved since it started is held up too (a trust question on screen), whether
+    // or not VibeForge reads its log: Antigravity's is read off the screen either way.
+    const waiting = Boolean(!ended && answered?.fromScreen && (answered.stuck || (engine && replyLogFor(engine.id, engine.bin))));
     const from = this.roster.list().find((item) => item.ptyId === taskPty) ?? null;
     const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
     let patch = "";

@@ -27,8 +27,17 @@ export function applyToast(
   workspace: string,
   home: string,
 ): { tone: "info" | "success" | "error"; title: string; body?: string } {
-  if (!result.files.length && !result.left) return { tone: "info", title: t("tasks.applyNothing") };
+  if (!result.files.length && !result.left && !result.stayed) return { tone: "info", title: t(result.already ? "tasks.applyAlready" : "tasks.applyNothing") };
   if (result.conflicts.length) return { tone: "error", title: t("tasks.applyConflicts"), body: applyConflictNote(t, result) };
+  // Files left unticked keep the copy; the main process doesn't look for ignored files then.
+  if (result.stayed) {
+    if (!result.files.length) return { tone: "info", title: t.count("tasks.appliedPartialStayed", result.stayed) };
+    return {
+      tone: "success",
+      title: t("tasks.appliedLeft", { workspace }),
+      body: `${t.count("tasks.appliedPartialApplied", result.files.length)} ${t.count("tasks.appliedPartialStayed", result.stayed)}`,
+    };
+  }
   if (result.pulled) {
     const { branch, upstream, alreadyUpToDate } = result.pulled;
     if (result.left) {

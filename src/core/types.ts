@@ -9,6 +9,20 @@ export type RunOrigin = "agent-chat" | "routine" | "task" | "code" | "chat";
 
 export type RunStatus = "running" | "exited" | "stopped" | "failed";
 
+/** How a routine run ended, or why it stays open for the person ("question"). */
+/**
+ * How a routine run ended, or why it stays open: `finished` (the CLI's log said its turn ended, or
+ * it quit by itself with code 0), `question` (open, waiting for a person), `timeout` (hit its time
+ * limit while working), `stuck` (ended after a question waited its time limit; not a failure),
+ * `cutoff` (VibeForge closed or lost the terminal host under it), `failed` (couldn't start, or the
+ * CLI quit with an error or a signal).
+ */
+/**
+ * How a routine's run ended. "limit": a CLI whose log VibeForge can't read ran until its time limit,
+ * the only way such a run ends on its own; not a failure.
+ */
+export type RoutineRunResult = "finished" | "question" | "timeout" | "limit" | "stuck" | "cutoff" | "failed";
+
 export type TaskStatus = "todo" | "running" | "review" | "done";
 
 /** What an agent costs to hand work to, as its owner rates it; "" when they haven't said. */
@@ -57,10 +71,27 @@ export interface Routine {
   schedule: Schedule;
   prompt: string;
   notify: boolean;
+  /**
+   * Per-run time limit in minutes: new routines get 120 (2 hours), routines saved before time
+   * limits existed have none (null) until the person sets one.
+   */
+  timeoutMinutes: number | null;
+  /** Work in a separate git worktree of the agent's folder instead of the folder itself. */
+  isolated: boolean;
+  /** That worktree, once a run has made it; gone again after Apply or Discard. */
+  copy: WorkingCopy | null;
   lastFiredAt: string | null;
   lastMissedAt: string | null;
+  /** Slots that passed while a run was still open: how many, the latest, and which run held them up. */
+  skippedSlots: SkippedSlots | null;
   /** Start even while another coding CLI is busy in the agent's folder, instead of waiting a turn. */
   shareCheckout: boolean;
+}
+
+export interface SkippedSlots {
+  runId: string;
+  count: number;
+  lastAt: string;
 }
 
 export interface Task {
@@ -114,11 +145,21 @@ export interface RunMeta {
   gitStart: string | null;
   /** The run this one continues, if any. */
   continuedFrom: string | null;
+  /** How a routine run ended, or why it stays open ("question"). */
+  result?: RoutineRunResult | null;
   /** Resolved local CLI harness (`"opencode" | "claude" | "codex"`) when run via Local AI. */
   localHarness?: string | null;
   /** Resolved model id when run via Local AI. */
   localModel?: string | null;
+  /** The Code pane it ran in, so a restart can offer to pick it back up there. */
+  paneId?: string | null;
+  /** The CLI's exact session, read from its own session log while it ran: what reopens it. */
+  resumeArgs?: string[] | null;
+  /** It ended because VibeForge closed: quit, restarted for an update, or went down without quitting. */
+  cutOff?: CutOff | null;
 }
+
+export type CutOff = "quit" | "update" | "crash";
 
 export interface EngineRow {
   id: string;
@@ -385,6 +426,17 @@ export interface WorkspaceCategory {
   name: string;
 }
 
+export interface WorkspaceCopySetup {
+  /** Gitignore-style patterns of git-ignored files to bring along; defaults to [".env*"] when omitted. */
+  files?: string[];
+  /** Project-relative folders to clone with `cp -a --reflink=auto` when making a copy (e.g. ["node_modules"]). */
+  folders?: string[];
+  /** Optional command run visibly in a terminal in the copy before the CLI starts. */
+  setupCommand?: string;
+  /** false: leave out what the project's `.worktreeinclude` names (used by default). */
+  worktreeInclude?: false;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -392,6 +444,8 @@ export interface Workspace {
   dockUrl: string;
   /** Custom category tab ids this workspace belongs to; omitted when in none (still shown in All). */
   categories?: string[];
+  /** What files/folders to bring into separate copies of this workspace, and an optional setup command. */
+  copySetup?: WorkspaceCopySetup;
 }
 
 export interface ChatRecord {
@@ -431,6 +485,8 @@ export interface LiveSession {
   programEngineId?: string | null;
   /** The folder `program` runs in. */
   programCwd?: string | null;
+  /** The Code pane it was started for. */
+  paneId?: string | null;
   /** A coding CLI here is busy (its output keeps coming); false once it has gone quiet. */
   working?: boolean;
   /** When the coding CLI here started: the run's start, or when it was typed into a shell. */
@@ -443,6 +499,8 @@ export interface LiveSession {
   talk?: TalkState | null;
   /** The Orchestrator started it: Code gives it a pane in its workspace. */
   orchestrated?: boolean;
+  /** A routine run whose turn ended asking the person a question, left open for them. */
+  needsInput?: boolean;
   /** Local model id when launched through the Local AI engine. */
   localModel?: string | null;
 }

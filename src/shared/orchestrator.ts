@@ -2,6 +2,7 @@
 // (src/core/orchestrator.ts), the window shows them and lets a person fix one before Go. No Node
 // here, so the window can check a step the same way the main process does.
 
+import { copySetupChange } from "./copy-setup.js";
 import type { EngineRow, OrchestratorMode } from "../core/types.js";
 import type { en } from "../ui/i18n/en.js";
 import { effortLevels } from "./launch-options.js";
@@ -227,6 +228,9 @@ export interface MaestroCopy {
   branch: string;
   base: string;
   repo: string;
+  seeded?: string[];
+  /** Files an earlier Apply of only some files brought in, with their content ids then. */
+  applied?: Array<{ path: string; id: string }>;
 }
 
 /** The fields a plan card can change on a step before Go. */
@@ -606,6 +610,10 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
       if (!pos) return "prompt";
       if (/^(?:top|first|bottom|last|up|down|\d+)$/.test(pos)) return null;
       return "prompt";
+    }
+    if (action === "copy-setup") {
+      // A step that would change nothing has nothing to say yet.
+      return Object.keys(copySetupChange(step) ?? {}).length ? null : "prompt";
     }
     return null;
   }

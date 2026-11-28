@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
@@ -6,16 +7,21 @@ import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl, t
 import { normalizeLocalServer, normalizeVibyRoute, vibyLocalModel } from "../../shared/local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
+import { applyUndoRestore, isRunInCopy, markLateEndTried, needsLateEndSnapshot, removeRunSnapshots, takeEndSnapshot, takeStartSnapshot, type RestoreUndoData, type RunRestoreUndoResult } from "../snapshots.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile, readRunTail } from "../run-storage.js";
 import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
-import { failStreak, ROUTINE_FAILING } from "../routines.js";
+import { failStreak, isCutOffRun, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
-import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
+import type { Agent, CutOff, Engine, EngineRow, LiveSession, RoutineRunResult, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
+import { readCutOff, settleCutOff, writeCutOff, type CutOffNote } from "../cut-off.js";
+import { wrapForCopy } from "../copy-setup.js";
+import { catalog, fill, phoneLanguage } from "../companion-text.js";
+import { matchCoreText } from "../../ui/core-match.js";
 import { removeCopy, type WorkingCopy } from "../worktrees.js";
-import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
+import { type CutOffRun, type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
 type Settle = () => unknown;
@@ -43,6 +49,10 @@ function stripTerminalCodes(raw: string): string {
  * and what is written when it ends. The desks in this folder hold the rest; `TeamService` puts
  * them together behind one API.
  */
+/** Who wrote into a pane: a person (or Viby, or a chat, for one), or another CLI's message. */
+/** Who wrote into a pane: the person typing, or a CLI or Viby (which never reset what a person's typing does). */
+export type PaneInputFrom = "person" | "cli";
+
 export class ServiceCore {
   readonly options: DeskOptions;
   readonly store: Store;
@@ -52,9 +62,13 @@ export class ServiceCore {
   private readonly listeners = new Set<(topics: Topic[]) => void>();
   private readonly exitWaiters = new Map<string, Array<() => void>>();
   private readonly finishing = new Set<Promise<void>>();
+  /** Explicit end state for a run VibeForge closes on purpose (routine turn end or time limit). */
+  private readonly pendingOutcome = new Map<string, { status: "exited" | "stopped"; exitCode?: number | null; result: RoutineRunResult; error?: string }>();
   /** Per shell: the latest command line in its foreground, and the queue that records it. */
   readonly shellArgv = new Map<string, string[]>();
   readonly recordings = new Map<string, Promise<void>>();
+  /** Per shell: the cut-off run its first CLI picks back up (typed in by Continue its session). */
+  readonly shellContinues = new Map<string, string>();
   /** Per shell: the host's last word on activity, kept while no coding CLI is in front to use it. */
   readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a run started: a tree that was already dirty isn't this run's doing. */
@@ -65,11 +79,14 @@ export class ServiceCore {
   readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
   readonly trash: Trash;
   private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: Settle }>();
+  private readonly restoreUndos = new Map<string, { data: RestoreUndoData; timer: ReturnType<typeof setTimeout> }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
   protected closed = false;
   private closePromise: Promise<void> | null = null;
   readonly settled: Promise<void>;
+  /** Resolves once runs cut off by the last close have their end snapshots (see settleCutOffSnapshots). */
+  readonly lateSnapshots: Promise<void>;
 
   constructor(options: DeskOptions) {
     this.options = options;
@@ -82,6 +99,8 @@ export class ServiceCore {
     // Anything still "running" in the index belongs to a process that died with the last app session.
     const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
     this.settled = Promise.all([this.settleOrphans(orphans), this.settleTrash(trashed)]).then(() => undefined);
+    // Then, without holding anything up, the end snapshots those runs never got.
+    this.lateSnapshots = this.settled.then(() => this.settleCutOffSnapshots()).catch(() => undefined);
   }
 
   whenSettled(): Promise<void> {
@@ -101,8 +120,10 @@ export class ServiceCore {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
     for (const entry of this.undoable.values()) clearTimeout(entry.timer);
+    for (const entry of this.restoreUndos.values()) clearTimeout(entry.timer);
     const settling = [...this.undoable.values()].flatMap((entry) => (entry.settle ? [entry.settle] : []));
     this.undoable.clear();
+    this.restoreUndos.clear();
     this.trash.empty();
     this.store.close();
     const tidied = settling.map((settle) => {
@@ -150,11 +171,63 @@ export class ServiceCore {
     return [...this.undoable.keys()].at(-1) ?? null;
   }
 
+  /** Keep a file-restore operation undoable for a short window, putting the end state back for those exact files. */
+  keepRestoreForUndo(data: RestoreUndoData): string {
+    const token = randomUUID();
+    const timer = setTimeout(() => {
+      this.restoreUndos.delete(token);
+    }, UNDO_MS);
+    timer.unref?.();
+    this.restoreUndos.set(token, { data, timer });
+    return token;
+  }
+
+  /** Undo a previous "Put files back as before this run" action, saying which files it had to leave alone. */
+  async undoRunRestore(token: string): Promise<RunRestoreUndoResult> {
+    const entry = this.restoreUndos.get(token);
+    if (!entry) throw new Error("It is too late to undo that.");
+    clearTimeout(entry.timer);
+    this.restoreUndos.delete(token);
+    const result = await applyUndoRestore(entry.data);
+    if (result.reverted.length > 0) this.emit("workspaces");
+    return result;
+  }
+
+  // ---------------------------------------------------------------- input into a pane
+
+  /**
+   * Something went into a pane from outside its program: a person typing, or something sent on a
+   * person's behalf (Viby answering a prompt, a chat message), or (`from` "cli") another CLI's
+   * message through `vibeforge tell`. Every write into a pane reports here once it's in, so
+   * routines, messages and the attention marks all see the same input. TeamService hands it on.
+   */
+  paneInput(_ptyId: string, _data: string, _from: PaneInputFrom): void {}
+
+  /** Whether something will still come back to this terminal (a task it handed out reporting back). */
+  expectsReply(_ptyId: string): boolean {
+    return false;
+  }
+
   // ---------------------------------------------------------------- events
 
   onChange(listener: (topics: Topic[]) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * A copy's CLI argv, wrapped to show first what copy setup couldn't bring along and to run its
+   * setup command (copy-setup.ts), in the window's language.
+   */
+  private async wrapForCopy(argv: string[], setupCommand?: string | null, notes?: readonly string[]): Promise<string[]> {
+    if (!setupCommand?.trim() && !notes?.length) return argv;
+    const settings = this.store.readSettings();
+    const words = await catalog(phoneLanguage(settings.language, process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG));
+    const say = (text: string) => {
+      const found = matchCoreText(text);
+      return found ? fill(words[found.key], found.vars) : text;
+    };
+    return wrapForCopy(argv, { setupCommand, notes: notes?.map(say), words: { failed: words["core.copySetupFailed"] }, userShell: settings.defaultShell });
   }
 
   emit(...topics: Topic[]): void {
@@ -373,8 +446,9 @@ export class ServiceCore {
   async stopRun(id: string): Promise<void> {
     const run = this.store.getRun(id);
     if (!run || run.status !== "running") return;
+    this.pendingOutcome.delete(id);
     const ptyId = this.ptyByRun.get(id);
-    this.store.saveRun({ ...run, stopRequested: true });
+    this.store.saveRun({ ...run, stopRequested: true, result: undefined });
     if (ptyId) {
       await this.options.host.kill(ptyId);
       return;
@@ -382,6 +456,54 @@ export class ServiceCore {
     await this.finishRun(run.id, { exitCode: null, signal: null, status: "stopped" });
   }
 
+  /**
+   * Ends a running session with an explicit outcome (e.g. a routine whose turn ended cleanly,
+   * or a routine that hit its time limit) so its exit records that result instead of plain "stopped".
+   */
+  async endRunWithResult(
+    id: string,
+    outcome: { status: "exited" | "stopped"; exitCode?: number | null; result: RoutineRunResult; error?: string },
+  ): Promise<void> {
+    const run = this.store.getRun(id);
+    if (!run || run.status !== "running") return;
+    const ptyId = this.ptyByRun.get(id);
+    this.pendingOutcome.set(id, outcome);
+    this.store.saveRun({
+      ...run,
+      stopRequested: outcome.status === "stopped",
+      result: outcome.result,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    });
+    if (ptyId) {
+      await this.options.host.kill(ptyId);
+      return;
+    }
+    this.pendingOutcome.delete(id);
+    await this.finishRun(run.id, {
+      exitCode: outcome.exitCode ?? null,
+      signal: null,
+      status: outcome.status,
+      ...(outcome.error ? { error: outcome.error } : {}),
+      result: outcome.result,
+    });
+  }
+
+
+  /**
+   * The arguments that reopen exactly the session `run` was in: the "--resume <id>" line the CLI
+   * printed as it exited, else the session read from its log while it ran. Null when neither is known.
+   */
+  exactResume(run: RunMeta, row?: EngineRow): string[] | null {
+    const engine = row ?? this.store.readEngineRows().find((item) => item.id === run.engine);
+    if (engine && run.dir) {
+      const fromTranscript = resumeArgsFromTranscript(engine, readText(path.join(run.dir, RUN_FILES.transcript)));
+      if (fromTranscript) return fromTranscript;
+      // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
+      const fromScrollback = resumeArgsFromTranscript(engine, stripTerminalCodes(readRunTail(run.dir, RUN_FILES.scrollback)));
+      if (fromScrollback) return fromScrollback;
+    }
+    return run.resumeArgs?.length ? run.resumeArgs : null;
+  }
 
   /**
    * How to pick a finished session back up with the same engine: its exact session id when the
@@ -402,13 +524,8 @@ export class ServiceCore {
       if (row.id === LOCAL_ENGINE_ID && previous.localHarness && harness && previous.localHarness !== harness) {
         return { native: false, resumeArgs: null };
       }
-      if (previous.dir) {
-        const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
-        if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
-        // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
-        const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
-        if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
-      }
+      const exact = this.exactResume(previous, row);
+      if (exact) return { native: true, resumeArgs: exact };
     } else if (!opts?.allowBareWithoutPrevious) {
       return { native: false, resumeArgs: null };
     }
@@ -564,11 +681,17 @@ export class ServiceCore {
     chatId?: string | null;
     workspaceId?: string | null;
     continuedFrom?: string | null;
+    /** The Code pane it is started in. */
+    paneId?: string | null;
     /** The Orchestrator started it (Code gives it a pane). */
     orchestrated?: boolean;
     /** The model and reasoning effort to start the CLI with, where it takes them (launchOptionArgs). */
     model?: string;
     effort?: string;
+    /** Optional per-workspace setup command run visibly in the copy's terminal before the CLI starts. */
+    setupCommand?: string | null;
+    /** What copy setup couldn't bring along, shown in the copy's terminal before the CLI starts. */
+    setupNotes?: readonly string[];
     cols?: number;
     rows?: number;
   }): Promise<Launched> {
@@ -597,15 +720,29 @@ export class ServiceCore {
       options: launchArgs,
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
+    const spawnArgv = await this.wrapForCopy(plan.argv, input.setupCommand, input.setupNotes);
     let gitStart: string | null = null;
-    try {
-      gitStart = await this.options.host.gitHead(input.cwd);
-      // What the tree looked like: a run that only answers a question ends with "No changes",
-      // however many edits were already there, and doesn't go to Review for them.
-      if (gitStart) this.gitAtStart.set(id, await this.options.host.snapshotGit(input.cwd, gitStart));
-    } catch {
-      /* not a repository, or git is slow: the run is recorded without */
-    }
+    const captureStartGit = async () => {
+      try {
+        gitStart = await this.options.host.gitHead(input.cwd);
+        // What the tree looked like: a run that only answers a question ends with "No changes",
+        // however many edits were already there, and doesn't go to Review for them.
+        if (gitStart) this.gitAtStart.set(id, await this.options.host.snapshotGit(input.cwd, gitStart));
+      } catch {
+        /* not a repository, or git is slow: the run is recorded without */
+      }
+    };
+    const captureStartSnapshot = async () => {
+      if (isRunInCopy(input.cwd, this.options.dataRoot)) return;
+      await takeStartSnapshot({
+        cwd: input.cwd,
+        runId: id,
+        runDir: dir,
+        dataRoot: this.options.dataRoot,
+        onWarn: (message) => this.options.host.logWarn?.(message),
+      });
+    };
+    await Promise.all([captureStartGit(), captureStartSnapshot()]);
     this.dirtyAtStart.set(id, dirtyFiles(input.cwd).catch(() => null));
     const meta: RunMeta = {
       id,
@@ -633,6 +770,9 @@ export class ServiceCore {
       changes: null,
       gitStart,
       continuedFrom: input.continuedFrom ?? null,
+      ...(input.paneId ? { paneId: input.paneId } : {}),
+      // The session it reopens, until its own log says otherwise: a second close before it writes keeps it exact.
+      ...(input.resumeArgs?.length ? { resumeArgs: input.resumeArgs } : {}),
       ...(input.engine.harness ? { localHarness: input.engine.harness } : {}),
       ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     };
@@ -641,7 +781,7 @@ export class ServiceCore {
     try {
       spawned = await this.options.host.spawn({
         cwd: input.cwd,
-        argv: plan.argv,
+        argv: spawnArgv,
         ...(input.engine.env && Object.keys(input.engine.env).length ? { env: input.engine.env } : {}),
         runDir: dir,
         pasteInput,
@@ -651,7 +791,9 @@ export class ServiceCore {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.dirtyAtStart.delete(id);
-      this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message });
+      this.gitAtStart.delete(id);
+      await removeRunSnapshots(meta);
+      this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message, ...(meta.origin === "routine" ? { result: "failed" as const } : {}) });
       this.emit("runs");
       throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
     }
@@ -671,6 +813,7 @@ export class ServiceCore {
       taskId: meta.taskId,
       workspaceId: meta.workspaceId,
       routineId: meta.routineId,
+      ...(input.paneId ? { paneId: input.paneId } : {}),
       ...(input.orchestrated ? { orchestrated: true } : {}),
       ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     });
@@ -684,6 +827,7 @@ export class ServiceCore {
         }
       }
     }
+    if (input.continuedFrom) this.settleCutOff([input.continuedFrom]);
     this.emit("runs", "live", "chats", "routines", "tasks");
     return { runId: id, ptyId: spawned.ptyId };
   }
@@ -704,7 +848,20 @@ export class ServiceCore {
       }
       this.ptyByRun.delete(session.runId);
       const run = this.store.getRun(session.runId);
-      const done = this.finishRun(session.runId, { exitCode, signal, status: run?.stopRequested ? "stopped" : "exited", ...(error ? { error } : {}) });
+      const planned = this.pendingOutcome.get(session.runId);
+      this.pendingOutcome.delete(session.runId);
+      const resolvedStatus: "exited" | "stopped" = planned ? planned.status : run?.stopRequested ? "stopped" : "exited";
+      const resolvedExit = planned && planned.exitCode !== undefined ? planned.exitCode : exitCode;
+      const resolvedSignal = planned?.status === "exited" && planned.exitCode === 0 ? null : signal;
+      const resolvedError = planned?.error ?? error ?? undefined;
+      const resolvedResult: RoutineRunResult | undefined = planned?.result ?? (run?.origin === "routine" ? routineExitResult(run, resolvedStatus, resolvedExit, signal, error) : undefined);
+      const done = this.finishRun(session.runId, {
+        exitCode: resolvedExit,
+        signal: resolvedSignal,
+        status: resolvedStatus,
+        ...(resolvedError ? { error: resolvedError } : {}),
+        ...(resolvedResult ? { result: resolvedResult } : {}),
+      });
       this.finishing.add(done);
       try {
         await done;
@@ -720,7 +877,7 @@ export class ServiceCore {
 
   async finishRun(
     runId: string,
-    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped"; error?: string },
+    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped"; error?: string; result?: RoutineRunResult },
   ): Promise<void> {
     if (this.closed) return;
     const run = this.store.getRun(runId);
@@ -731,19 +888,31 @@ export class ServiceCore {
     if (this.closed) return;
     const own = await this.writePatch(run, "", dirty);
     if (this.closed) return;
+    if (!isRunInCopy(run.cwd, this.options.dataRoot)) {
+      await takeEndSnapshot({
+        cwd: run.cwd,
+        runId: run.id,
+        runDir: run.dir,
+        onWarn: (message) => this.options.host.logWarn?.(message),
+      });
+      if (this.closed) return;
+    }
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
     this.dirtyAtStart.delete(runId);
     // Only edits that were there before it started, left as they were: none of this run's doing.
     const untouched = Boolean(dirty?.size) && own !== null && !own.trim() && !git.includes("commits since the run started");
+    const status = latest.stopRequested ? "stopped" : outcome.status;
+    const result = outcome.result ?? (status === "stopped" ? (latest.result ?? undefined) : latest.result === "question" ? undefined : (latest.result ?? undefined));
     const finished = this.store.saveRun({
       ...latest,
-      status: latest.stopRequested ? "stopped" : outcome.status,
+      status,
       exitCode: outcome.exitCode,
       signal: outcome.signal,
       endedAt: this.now().toISOString(),
       ...(outcome.error ? { error: outcome.error } : {}),
+      result,
       changes: (before !== undefined && before === git) || untouched ? "No changes" : summarizeSnapshot(git),
     });
     this.indexText(finished);
@@ -759,7 +928,14 @@ export class ServiceCore {
       this.options.host.finished?.({
         runId: finished.id,
         origin: finished.origin,
-        outcome: finished.status === "stopped" ? "stopped" : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0) ? "failed" : "ok",
+        outcome:
+          finished.result === "timeout" || finished.result === "cutoff" || finished.result === "failed"
+            ? "failed"
+            : finished.status === "stopped" || finished.result === "stuck"
+              ? "stopped"
+              : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0)
+                ? "failed"
+                : "ok",
       });
     } catch {
       /* a sound is never worth failing a run over */
@@ -778,13 +954,23 @@ export class ServiceCore {
       if (routine && !routine.notify) return;
     }
     const outcome =
-      run.status === "stopped"
-        ? "stopped"
-        : run.status === "failed" && run.exitCode === null
-          ? `couldn't start: ${run.error ?? "unknown error"}`
-          : run.exitCode && run.exitCode !== 0
-          ? `exited with code ${run.exitCode}`
-          : "finished";
+      run.result === "timeout"
+        ? "hit its time limit"
+        : run.result === "limit"
+          ? "ended at its time limit"
+          : run.result === "stuck"
+          ? "stuck on a question"
+          : isCutOffRun(run)
+          ? "cut off"
+          : run.status === "stopped"
+            ? "stopped"
+            : run.status === "failed" && run.exitCode === null
+              ? `couldn't start: ${run.error ?? "unknown error"}`
+              : run.exitCode && run.exitCode !== 0
+                ? `exited with code ${run.exitCode}`
+                : run.result === "failed" && run.signal !== null
+                  ? `ended by signal ${run.signal}`
+                  : "finished";
     // Said once, on the run that makes it a streak; Routines and Home keep it lit after that.
     const streak = run.routineId ? failStreak(this.store.queryRuns({ routineId: run.routineId, limit: ROUTINE_FAILING + 1 })) : 0;
     const failing = streak === ROUTINE_FAILING ? `failed ${streak} times in a row` : null;
@@ -819,7 +1005,9 @@ export class ServiceCore {
         status: "stopped",
         endedAt: run.endedAt ?? this.now().toISOString(),
         error: run.error ?? "VibeForge closed while this run was going.",
+        ...(run.origin === "routine" && run.result !== "timeout" ? { result: "cutoff" as const } : {}),
         changes,
+        cutOff: run.cutOff ?? "crash",
       });
       if (run.taskId) {
         // Only when this orphan is still the task's run: an Execute during settling owns it now.
@@ -827,7 +1015,41 @@ export class ServiceCore {
         if (task?.status === "running" && task.runIds.at(-1) === run.id) this.store.writeTask({ ...task, status: "review" });
       }
     }
-    if (orphans.length) this.emit("runs", "tasks");
+    if (orphans.length) {
+      // Offered back at this start, as a quit's are; a routine's next slot is its own retry.
+      const runIds = orphans.filter((run) => run.origin !== "routine").map((run) => run.id);
+      // A quit or update whose last runs were never recorded left these behind: they join its note,
+      // which keeps its reason. Otherwise VibeForge went down, and this start offers what it cut off.
+      const noted = this.readNote();
+      if (noted && runIds.some((id) => noted.runIds.includes(id))) this.noteCutOff({ ...noted, runIds: [...new Set([...noted.runIds, ...runIds])] });
+      else if (runIds.length) this.noteCutOff({ reason: "crash", at: this.now().toISOString(), runIds, offered: true });
+      this.emit("runs", "tasks", "routines");
+    }
+  }
+
+  /**
+   * A run a close cut off may have ended before its end snapshot was saved: the folder as this
+   * start finds it stands in for that, marked as taken late, so the run keeps its undo.
+   */
+  private async lateEndSnapshot(run: RunMeta): Promise<void> {
+    if (!run.dir || !run.cwd || isRunInCopy(run.cwd, this.options.dataRoot) || !needsLateEndSnapshot(run)) return;
+    const done = await takeEndSnapshot({
+      cwd: run.cwd,
+      runId: run.id,
+      runDir: run.dir,
+      late: true,
+      onWarn: (message) => this.options.host.logWarn?.(message),
+    });
+    // Tried once: a folder too big to snapshot isn't tried again at every start.
+    if (!done) markLateEndTried(run);
+  }
+
+  /** Runs a crash, quit or update cut off whose end snapshot didn't get saved in time. */
+  private async settleCutOffSnapshots(): Promise<void> {
+    for (const run of this.store.allRuns()) {
+      if (this.closed) return;
+      if (run.cutOff && run.status !== "running") await this.lateEndSnapshot(run);
+    }
   }
 
   private async settleTrash(trashed: unknown[]): Promise<void> {
@@ -838,9 +1060,10 @@ export class ServiceCore {
       if (!item || typeof item !== "object") continue;
       const note = item as { kind?: unknown; taskId?: unknown; copy?: WorkingCopy };
       if (note.kind !== "copy" || typeof note.taskId !== "string" || !note.copy) continue;
-      // A task that is still there with a copy (Execute made a new one) owns that folder and branch; a
-      // discarded copy's task is still there without one, and its copy goes.
-      if (this.store.getTask(note.taskId)?.copy || copies.some((entry) => entry?.id === note.taskId)) continue;
+      // A task, routine, or Viby copy that still holds this folder/branch keeps it.
+      const ownedByRoutine =
+        note.taskId.startsWith("routine-") && Boolean(this.store.getRoutine(note.taskId.slice("routine-".length))?.copy);
+      if (this.store.getTask(note.taskId)?.copy || ownedByRoutine || copies.some((entry) => entry?.id === note.taskId)) continue;
       await removeCopy(note.copy, { dataRoot: this.options.dataRoot, taskId: note.taskId }, true).catch(() => undefined);
     }
   }
@@ -896,13 +1119,109 @@ export class ServiceCore {
     }
   }
 
-  /** Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped". */
-  prepareShutdown(): void {
+  /**
+   * Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped",
+   * and as cut off by this close (`reason`), so the next start offers to pick it back up. A
+   * routine's run is recorded as cut off; its next slot is its own retry, so it isn't offered.
+   */
+  prepareShutdown(reason: CutOff = "quit"): void {
+    const cut: string[] = [];
     for (const session of this.live.values()) {
       if (!session.runId) continue;
       const run = this.store.getRun(session.runId);
-      if (run && run.status === "running" && !run.stopRequested) this.store.saveRun({ ...run, stopRequested: true });
+      if (!run || run.status !== "running" || run.stopRequested) continue;
+      if (run.origin === "routine") {
+        // One waiting on a question was waiting on the person, not failing: it ends stuck on it.
+        const result = run.result === "question" ? ("stuck" as const) : ("cutoff" as const);
+        this.pendingOutcome.set(run.id, { status: "stopped", result, error: "Stopped when VibeForge quit." });
+        this.store.saveRun({ ...run, stopRequested: true, cutOff: reason, result, error: "Stopped when VibeForge quit." });
+        continue;
+      }
+      this.store.saveRun({ ...run, stopRequested: true, cutOff: reason });
+      cut.push(run.id);
     }
+    this.noteCutOff({ reason, at: this.now().toISOString(), runIds: cut });
+  }
+
+  // ---------------------------------------------------------------- runs cut off by a close
+
+  /** The runs the last close cut off, still to be picked back up or let go. */
+  private cutOffNote: CutOffNote | null | undefined;
+
+  private noteCutOff(note: CutOffNote): void {
+    if (this.closed) return;
+    this.cutOffNote = note;
+    try {
+      writeCutOff(this.options.dataRoot, note);
+    } catch {
+      /* the offer is a nicety; the runs themselves are recorded */
+    }
+  }
+
+  /**
+   * The note as this start found it. It is offered at this start only: the next one drops it unless
+   * a close wrote a new one, so an offer ignored once doesn't come back days later.
+   */
+  private readNote(): CutOffNote | null {
+    if (this.cutOffNote !== undefined) return this.cutOffNote;
+    const found = readCutOff(this.options.dataRoot);
+    if (found?.offered) {
+      this.noteCutOff({ ...found, runIds: [] });
+      return this.cutOffNote ?? null;
+    }
+    this.cutOffNote = found;
+    if (found?.runIds.length) this.noteCutOff({ ...found, offered: true });
+    return this.cutOffNote;
+  }
+
+  /** What the last close cut off and how it closed, with what each run needs to reopen its session. */
+  async cutOffRuns(): Promise<{ reason: CutOff; at: string; runs: CutOffRun[] } | null> {
+    // A crash's runs are noted once they are settled, which can take a moment after start.
+    await this.settled;
+    const note = this.readNote();
+    if (!note?.runIds.length) return null;
+    const runs: CutOffRun[] = [];
+    for (const id of note.runIds) {
+      const run = this.store.getRun(id);
+      // Already picked up (a live run again), or deleted since.
+      if (!run || run.status === "running" || this.ptyByRun.has(id)) continue;
+      runs.push({
+        runId: run.id,
+        title: run.title,
+        origin: run.origin,
+        engine: run.engine,
+        workspaceId: run.workspaceId,
+        paneId: run.paneId ?? null,
+        chatId: run.chatId,
+        taskId: run.taskId,
+        exact: Boolean(this.exactResume(run)),
+      });
+    }
+    return runs.length ? { reason: note.reason, at: note.at, runs } : null;
+  }
+
+  /** These were picked back up, or let go: they are not offered again. */
+  settleCutOff(runIds: readonly string[]): void {
+    const note = this.readNote();
+    if (!note || !runIds.some((id) => note.runIds.includes(id))) return;
+    this.noteCutOff(settleCutOff(note, runIds) ?? note);
+    this.emit("runs");
+  }
+
+  /** The pane's cut-off run is let go: something else started there. */
+  settleCutOffInPane(paneId: string): void {
+    const note = this.readNote();
+    const ids = note?.runIds.filter((id) => this.store.getRun(id)?.paneId === paneId) ?? [];
+    if (ids.length) this.settleCutOff(ids);
+  }
+
+  /** The live run that already picks `runId` back up, if one does: a second Continue goes there. */
+  continuedLive(runId: string): { runId: string; ptyId: string } | null {
+    for (const session of this.live.values()) {
+      if (!session.runId) continue;
+      if (this.store.getRun(session.runId)?.continuedFrom === runId) return { runId: session.runId, ptyId: session.ptyId };
+    }
+    return null;
   }
 
   /** Resolves when every exit already reported has finished writing its run. */
@@ -917,7 +1236,15 @@ export class ServiceCore {
       if (!session.runId) continue;
       const run = this.store.getRun(session.runId);
       if (!run || run.status !== "running") continue;
-      this.store.saveRun({ ...run, status: "stopped", stopRequested: true, endedAt: ended, error: "Stopped when VibeForge quit." });
+      this.store.saveRun({
+        ...run,
+        status: "stopped",
+        stopRequested: true,
+        endedAt: ended,
+        error: "Stopped when VibeForge quit.",
+        cutOff: run.cutOff ?? "quit",
+        ...(run.origin === "routine" ? { result: "cutoff" as const } : {}),
+      });
       if (run.taskId) {
         const task = this.store.getTask(run.taskId);
         if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });
@@ -932,4 +1259,18 @@ export class ServiceCore {
     for (const place of places) if (isDirectory(place)) return path.resolve(place);
     return null;
   }
+}
+
+/**
+ * How a routine's run ended when its terminal did, with no outcome planned for it: cut off when
+ * the terminal host stopped under it (`error` is only given then), finished when the CLI quit by
+ * itself with code 0, failed when it quit with an error code or was ended by a signal. A person's
+ * Stop records no result; neither does an exit that says nothing (no code, no signal).
+ */
+function routineExitResult(run: RunMeta, status: "exited" | "stopped", exitCode: number | null, signal: number | null, error: string | null): RoutineRunResult | undefined {
+  if (error) return "cutoff";
+  if (status !== "exited") return run.result === "question" ? undefined : (run.result ?? undefined);
+  if (exitCode === 0) return "finished";
+  if ((exitCode !== null && exitCode !== 0) || signal !== null) return "failed";
+  return undefined;
 }

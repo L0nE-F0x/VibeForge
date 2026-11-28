@@ -125,9 +125,11 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     },
     "app.pathExists": (target) => fs.existsSync(target),
     "app.toggleDevTools": () => ctx.win?.webContents.toggleDevTools(),
-    "app.restart": () => {
+    "app.restart": (opts) => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
-      log.info("Restarting");
+      log.info(opts?.reason === "update" ? "Restarting to finish an update" : "Restarting");
+      // After an update the CLIs it cut off reopen by themselves (core.prepareShutdown notes why).
+      if (opts?.reason === "update") ctx.closeReason = "update";
       // A version in the installer's versions/ comes back through the current launcher, so the
       // version installed now starts (after an update or Go back), not this one again.
       app.relaunch(relaunchOptions(ctx.appRoot, process.execPath, relaunchArgs(process.argv), fs.existsSync));
@@ -265,6 +267,10 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "agents.delete": (id) => s().deleteAgent(id),
     "agents.readMemory": (id) => s().readMemory(id),
     "agents.writeMemory": (id, text) => s().writeMemory(id, text),
+    "agents.proposals": (id) => s().listProposals(id),
+    "agents.proposalCounts": () => s().proposalCounts(),
+    "agents.keepProposals": (id, ids) => s().keepProposals(id, ids),
+    "agents.dropProposals": (id, ids) => s().dropProposals(id, ids),
 
     "skills.list": () => s().listSkills(),
     "skills.save": (input) => s().saveSkill(input),
@@ -278,6 +284,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "routines.runNow": (id, size, now) => s().runRoutineNow(id, size, now),
     "routines.cancelWait": (id) => s().cancelRoutineWait(id),
     "routines.preview": (schedule) => s().previewSchedule(schedule),
+    "routines.applyCopy": (id) => s().applyRoutineCopy(id),
+    "routines.discardCopy": (id) => s().discardRoutineCopy(id),
 
     "tasks.list": () => s().listTasks(),
     "tasks.save": (input) => s().saveTask(input),
@@ -288,7 +296,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "tasks.handOff": (runId, agentId) => s().handOff(runId, agentId),
     "tasks.stop": (id) => s().stopTask(id),
     "tasks.setStatus": (id, status) => s().setTaskStatus(id, status),
-    "tasks.applyCopy": (id) => s().applyTaskCopy(id),
+    "tasks.copyDiff": (id) => s().taskCopyDiff(String(id ?? "")),
+    "tasks.applyCopy": (id, skip) => s().applyTaskCopy(String(id ?? ""), fileList(skip)),
     "tasks.discardCopy": (id) => s().discardTaskCopy(id),
 
     "chats.list": (filter) => s().listChats(filter ?? {}),
@@ -303,6 +312,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
 
     "code.shell": (opts) => s().startShell(opts),
     "code.engine": (opts) => s().startEngine(opts),
+    "code.reopen": (ptyId, runId) => s().reopenInShell(String(ptyId), String(runId)),
 
     "runs.list": (query) => s().listRuns(query ?? {}),
     "runs.inbox": () => s().inbox(),
@@ -311,9 +321,20 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "runs.markAllOpened": () => s().markAllOpened(),
     "runs.stop": (id) => s().stopRun(id),
     "runs.continue": (id, size) => s().continueRun(id, size),
+    "runs.cutOff": () => s().cutOffRuns(),
+    "runs.cutOffSettle": (runIds) => s().settleCutOff(Array.isArray(runIds) ? runIds.filter((id) => typeof id === "string") : []),
     "runs.search": (text, limit) => s().searchRuns(String(text ?? "").slice(0, 200), typeof limit === "number" ? limit : undefined),
     "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
     "runs.markdown": (id) => s().runMarkdown(id),
+    "runs.restorePreview": (id) => s().previewRunRestore(String(id ?? "")),
+    "runs.restore": (id, picks) =>
+      s().restoreRun(
+        String(id ?? ""),
+        (Array.isArray(picks) ? picks : [])
+          .filter((pick): pick is { path: string; expect: string } => typeof pick?.path === "string" && typeof pick?.expect === "string")
+          .map((pick) => ({ path: pick.path, expect: pick.expect })),
+      ),
+    "runs.undoRestore": (token) => s().undoRunRestore(String(token ?? "")),
     "storage.summary": () => s().storageSummary(),
     "storage.tidy": () => s().maintainRuns(),
 
@@ -349,7 +370,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "orchestrator.editStep": (turnId, stepId, patch) => s().orchestratorEditStep(String(turnId ?? ""), String(stepId ?? ""), patch && typeof patch === "object" ? patch : {}),
     "orchestrator.removeStep": (turnId, stepId) => s().orchestratorRemoveStep(String(turnId ?? ""), String(stepId ?? "")),
     "orchestrator.copyDiff": (copyId) => s().orchestratorCopyDiff(String(copyId ?? "")),
-    "orchestrator.applyCopy": (copyId) => s().orchestratorApplyCopy(String(copyId ?? "")),
+    "orchestrator.applyCopy": (copyId, skip) => s().orchestratorApplyCopy(String(copyId ?? ""), fileList(skip)),
     "orchestrator.discardCopy": (copyId) => s().orchestratorDiscardCopy(String(copyId ?? "")),
 
     "sync.view": () => sync.view(),
@@ -399,7 +420,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       ctx.service?.onHumanInput(ptyId, "\r");
       return supervisor.send(ptyId, text);
     },
-    "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty, toPty, what, selection }),
+    "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty: typeof fromPty === "string" ? fromPty : null, toPty, what, selection }),
     "talk.review": (authorPty, reviewerPty) => s().startReview(authorPty, reviewerPty),
     "talk.stop": (ptyId) => s().stopTalk(ptyId),
     "talk.startTasks": (ptyId, taskIds) => s().startHeldTasks(ptyId, taskIds),
@@ -432,6 +453,11 @@ export function registerIpc(ctx: MainContext, parts: IpcParts): void {
       throw error;
     }
   });
+}
+
+/** A list of file names from the renderer, or undefined when it sent none. */
+function fileList(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
 }
 
 const talkLimiters = new WeakMap<MainContext, TalkRateLimiter>();
@@ -472,5 +498,6 @@ export async function answerTalk(
   if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(pty) };
   if (request.op === "tell") return ctx.service.tell({ fromPty: pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
   if (request.op === "apply") return ctx.service.applyHandedTask({ fromPty: pty, task: request.task });
+  if (request.op === "remember") return ctx.service.rememberFromPty({ fromPty: pty, text: request.text });
   return ctx.service.handTask({ fromPty: pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs, gone });
 }

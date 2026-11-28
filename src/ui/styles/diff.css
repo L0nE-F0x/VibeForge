@@ -1,4 +1,4 @@
-/* ------------------------------------------------------------------ diff */
+/* ------------------------------------------------------------------ diff & review */
 
 .diff {
   margin: 0;
@@ -9,54 +9,101 @@
   border-radius: 0;
   background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
   overflow: auto;
-  padding: 8px 0;
   user-select: text;
 }
 
-.diff div {
-  padding: 0 14px;
-  white-space: pre;
+.review-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  container-type: inline-size;
 }
 
-.diff .add {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 7%, transparent);
+.review-toolbar,
+.review-notes-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-dark);
+  font-size: var(--fs-sm);
 }
 
-.diff .del {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 7%, transparent);
+.review-notes-bar {
+  border-color: var(--sel-line);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-dark));
 }
 
-.diff .hunk {
-  color: var(--cyan);
+.review-filter {
+  width: 180px;
+  height: 24px;
+  font-size: var(--fs-sm);
 }
 
-.diff .file {
-  color: var(--accent);
-  font-weight: 700;
-  margin-top: 10px;
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
 }
 
-.diff .meta {
-  color: var(--fg-3);
+.review-files {
+  max-height: 220px;
+  overflow: auto;
 }
 
-/* The files a run changed, above its diff: click one to land on it. */
+@container (min-width: 720px) {
+  .review-layout {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+  .review-files {
+    position: sticky;
+    top: 0;
+    max-height: calc(100vh - 220px);
+  }
+}
+
+.review-diffs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  min-width: 0;
+}
+
+.review-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+/* The files a run changed, beside or above its diff: click one to unfold and jump to it. */
 .diff-files {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
   background: var(--bg-dark);
+  min-width: 0;
 }
 
 .diff-file {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  text-align: left;
+  gap: 6px;
+  padding: 0 8px;
   border-top: 1px solid var(--line);
+  min-width: 0;
 }
 
 .diff-file:first-child {
@@ -65,6 +112,36 @@
 
 .diff-file:hover {
   background: var(--hover-fill);
+}
+
+.diff-file.is-viewed {
+  color: var(--fg-3);
+}
+
+.diff-file-jump {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 2px;
+  text-align: left;
+  font-size: var(--fs-sm);
+}
+
+.diff-check {
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.diff-note-pill {
+  flex: none;
+  padding: 0 5px;
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  border: 1px solid var(--sel-line);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .diff-count {
@@ -79,4 +156,279 @@
 
 .diff-count.del {
   color: var(--red);
+}
+
+.diff-card {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 82%, transparent);
+  min-width: 0;
+}
+
+/* Files off screen aren't laid out or painted until they scroll near: Expand all on a big review
+   stays quick. Each card says about how tall it is (DiffReview's cardHeight). */
+.review-diffs > .diff-card {
+  content-visibility: auto;
+}
+
+.diff-applied {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--green);
+}
+
+.diff-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.diff-card.is-folded .diff-card-head {
+  border-bottom: 0;
+}
+
+.diff-card-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-3);
+}
+
+.diff-card-toggle:hover,
+.diff-card-path:hover {
+  color: var(--accent);
+}
+
+.diff-card-path {
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.diff-card.is-viewed .diff-card-path {
+  color: var(--fg-2);
+}
+
+.diff-viewed-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+.diff-viewed-btn:hover {
+  border-color: var(--hover-line);
+  color: var(--accent);
+  background: var(--hover-fill);
+}
+
+.diff-viewed-btn.is-on {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 42%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+.diff-folded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: var(--fs-sm);
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+
+.diff-folded:hover {
+  background: var(--hover-fill);
+}
+
+.diff-table {
+  position: relative;
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.diff-row {
+  display: flex;
+  align-items: baseline;
+  min-width: max-content;
+  padding-right: 14px;
+}
+
+.diff-row.can-note {
+  cursor: pointer;
+}
+
+.diff-row.can-note:hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: -1px;
+}
+
+.diff-row.has-note {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.diff-row.add {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+}
+
+.diff-row.del {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+}
+
+.diff-row.hunk {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 6%, transparent);
+  margin-top: 4px;
+}
+
+.diff-row.hunk:first-child {
+  margin-top: 0;
+}
+
+.diff-row.meta {
+  color: var(--fg-3);
+}
+
+.diff-ln {
+  flex: none;
+  width: 44px;
+  padding: 0 6px;
+  text-align: right;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  user-select: none;
+}
+
+.diff-sign {
+  position: relative;
+  flex: none;
+  width: 22px;
+  text-align: center;
+  user-select: none;
+  color: var(--fg-3);
+}
+
+.diff-row.add .diff-sign {
+  color: var(--green);
+}
+
+.diff-row.del .diff-sign {
+  color: var(--red);
+}
+
+/* One note button per file, moved onto the line under the pointer (or picked with the arrow keys). */
+.diff-note-trigger {
+  position: absolute;
+  top: 0;
+  left: 88px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
+  color: var(--accent);
+  background: var(--bg-dark);
+  opacity: 0;
+}
+
+.diff-table:hover .diff-note-trigger[data-at],
+.diff-note-trigger:focus-visible {
+  opacity: 1;
+}
+
+.diff-code {
+  white-space: pre;
+  flex: 1;
+}
+
+.diff-more {
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* Inline line notes & composer */
+.diff-note,
+.diff-note-edit {
+  margin: 4px 14px 6px 96px;
+  padding: 8px 10px;
+  border: 1px solid var(--sel-line);
+  background: var(--bg-dark);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 680px;
+}
+
+.diff-note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+}
+
+.diff-note-target {
+  font-size: var(--fs-xs);
+  color: var(--accent);
+}
+
+.diff-note-body {
+  white-space: pre-wrap;
+  color: var(--fg);
+  user-select: text;
+}
+
+.diff-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-3);
+}
+
+.diff-note-btn:hover {
+  color: var(--accent);
+}
+
+.diff-note-btn.danger:hover {
+  color: var(--red);
+}
+
+/* Light syntax tokens mixed with foreground so dark and light Omarchy themes stay readable */
+.tok-kw {
+  color: color-mix(in srgb, var(--magenta) 78%, var(--fg));
+}
+
+.tok-str {
+  color: color-mix(in srgb, var(--green) 80%, var(--fg));
+}
+
+.tok-com {
+  color: var(--fg-3);
+  font-style: italic;
+}
+
+.tok-num {
+  color: color-mix(in srgb, var(--yellow) 84%, var(--fg));
+}
+
+.tok-ty {
+  color: color-mix(in srgb, var(--cyan) 80%, var(--fg));
 }

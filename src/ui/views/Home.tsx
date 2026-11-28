@@ -2,6 +2,7 @@ import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, GitBr
 import { useCallback, useMemo, useState } from "react";
 import type { LiveSession, RunView, Workspace, WorkspaceCategory } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
+import { isCutOffRun } from "../../shared/routine-result.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useOrchestrator, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { PickMark } from "../components/ListTools.js";
@@ -54,7 +55,7 @@ export function RunRow({
     : (engines.find((engine) => engine.id === run.engine)?.label ?? null);
   const { title, kind } = runLabel(run, engineLabel);
   // The dot says how it went; a chip only for what didn't simply finish.
-  const clean = run.status === "exited" && !run.exitCode;
+  const clean = run.status === "exited" && !run.exitCode && run.result !== "timeout" && run.result !== "failed" && run.result !== "stuck" && !isCutOffRun(run);
   const picking = picked !== undefined;
   return (
     <button type="button" className="run-row" aria-current={(!picking && selected) || undefined} aria-pressed={picking ? picked : undefined} onClick={onClick}>
@@ -86,7 +87,7 @@ export function RunRow({
         </span>
         {snippet && <Snippet text={snippet} className="truncate-2" />}
       </span>
-      {!compact && !clean && <StatusChip status={run.status} exitCode={run.exitCode} />}
+      {!compact && !clean && <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} origin={run.origin} cutOff={run.cutOff} />}
     </button>
   );
 }
@@ -524,7 +525,7 @@ export function HomeView() {
                     <button
                       key={session.ptyId}
                       type="button"
-                      className={`run-row${marks.get(session.ptyId)?.attention === "waiting" ? " needs-you" : ""}`}
+                      className={`run-row${marks.get(session.ptyId)?.attention === "waiting" || session.needsInput ? " needs-you" : ""}`}
                       onClick={() => {
                         if (session.origin === "agent-chat" && session.agentId && session.chatId) go({ view: "agents", agentId: session.agentId, tab: "chats", chatId: session.chatId });
                         else if (session.origin === "chat" && session.chatId) go({ view: "chat", chatId: session.chatId });
@@ -560,7 +561,7 @@ export function HomeView() {
               {upcoming.length > 0 && (
                 <div className="vstack" style={{ gap: 6 }}>
                   {upcoming.map(({ routine, at }) => (
-                    <button key={routine.id} type="button" className={`run-row${routine.failing ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
+                    <button key={routine.id} type="button" className={`run-row${routine.failing || routine.needsInput ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
                       <CalendarClock size={14} className="accent-text" />
                       <span className="vstack grow" style={{ gap: 1 }}>
                         <span className="title truncate">{routine.name}</span>

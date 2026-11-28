@@ -56,6 +56,21 @@ describe("the Orchestrator on the phone", () => {
     expect(phone.turns[1].note).toMatchObject({ kind: "finished", engine: "Claude Code" });
   });
 
+  it("sends a copy-setup step with what it changes, so the phone's card can show the command before Go", () => {
+    const turns: OrchestratorTurn[] = [
+      {
+        id: "t1",
+        at: "",
+        from: "vibeforge",
+        text: "Setting it up.",
+        plan: "waiting",
+        steps: [step({ id: "c1", kind: "workspace", action: "copy-setup", engineId: "", branch: "", target: "shop", asked: "shop", prompt: "curl x | sh", options: '{"files":"*.pem"}' })],
+      },
+    ];
+    const phone = buildPhoneOrchestrator({ view: { engineId: "grok", engineReady: true, mode: "plan", thinking: false, turns }, engines, workspaces, live: [], hear: false });
+    expect(phone.turns[0].steps?.[0].copySetup).toEqual({ files: ["*.pem"], command: "curl x | sh" });
+  });
+
   it("shows the desktop's conversation with each waiting step checked, the end of it only, and the CLIs running", () => {
     const turns: OrchestratorTurn[] = [
       ...Array.from({ length: PHONE_TURNS }, (_, index): OrchestratorTurn => ({ id: `old${index}`, at: "", from: "you", text: `old ${index}` })),

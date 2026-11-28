@@ -1,6 +1,7 @@
 import path from "node:path";
+import { normalizeCopySetup } from "./copy-setup.js";
 import { slugify } from "./slug.js";
-import type { Workspace, WorkspaceCategory } from "./types.js";
+import type { Workspace, WorkspaceCategory, WorkspaceCopySetup } from "./types.js";
 
 export type { WorkspaceCategory };
 
@@ -72,14 +73,23 @@ export function selectWorkspaceRecord(data: WorkspaceFile, id: string): Workspac
   return { ...data, lastWorkspaceId: id };
 }
 
-export function updateWorkspaceRecord(data: WorkspaceFile, id: string, patch: Partial<Pick<Workspace, "name" | "dockUrl" | "categories">>): WorkspaceFile {
+export function updateWorkspaceRecord(
+  data: WorkspaceFile,
+  id: string,
+  patch: Partial<Pick<Workspace, "name" | "dockUrl" | "categories">> & { copySetup?: WorkspaceCopySetup | null },
+): WorkspaceFile {
   const valid = new Set((data.categories ?? []).map((cat) => cat.id));
   return withCategories(
     {
       workspaces: data.workspaces.map((item) => {
         if (item.id !== id) return item;
-        const { categories: patchCats, ...restPatch } = patch;
+        const { categories: patchCats, copySetup: patchSetup, ...restPatch } = patch;
         const next: Workspace = { ...item, ...restPatch };
+        if (patchSetup !== undefined) {
+          const cleanSetup = normalizeCopySetup(patchSetup);
+          if (cleanSetup) next.copySetup = cleanSetup;
+          else delete next.copySetup;
+        }
         if (patchCats !== undefined) return withWsCategories(next, cleanWorkspaceCategories(patchCats, valid));
         return next;
       }),

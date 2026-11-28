@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { treeHash } from "../../scripts/pack-release.mjs";
+import { needsNoSandbox } from "../../scripts/test-electron.mjs";
 import { seedEngines } from "../../src/core/engines.js";
 
 // scripts/install.sh, run in a scratch home against a stand-in VibeForge repo: its npm ci makes
@@ -1041,7 +1042,7 @@ app.whenReady().then(() => {
       "--enable-wayland-ime",
       "--ozone-platform=headless",
       "--hidden",
-      ...(process.env.CI ? ["--no-sandbox"] : []),
+      ...(needsNoSandbox() ? ["--no-sandbox"] : []),
       `--user-data-dir=${profileDir}`,
     ];
     let legacyOutput = "";

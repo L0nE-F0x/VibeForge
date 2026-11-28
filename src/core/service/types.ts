@@ -5,7 +5,20 @@ import type { ExecuteBlocker } from "../tasks.js";
 import type { AgentTier, Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
 import type { Writer } from "../checkout.js";
 import type { ReplyLog } from "../replies.js";
+import type { SessionLog } from "../session-ids.js";
+import type {
+  LeftAloneReason,
+  RestoreFileAction,
+  RestoreItem,
+  RestorePick,
+  RunRestoreAvailability,
+  RunRestorePreview,
+  RunRestoreResult,
+  RunRestoreUndoResult,
+} from "../snapshots.js";
 import type { Waiting } from "./turns.js";
+
+export type { LeftAloneReason, RestoreFileAction, RestoreItem, RestorePick, RunRestoreAvailability, RunRestorePreview, RunRestoreResult, RunRestoreUndoResult };
 
 // ------------------------------------------------------------------ host contract
 
@@ -36,6 +49,8 @@ export interface DeskHost {
   watchReply?(opts: { kind: ReplyLog; cwd: string; since: number; words: string; signal: AbortSignal }): Promise<string | null>;
   /** The CLI's latest finished answer in `cwd`, from its own session log, if it left one since `since`. */
   lastReply?(opts: { kind: ReplyLog; cwd: string; since: number; words?: string }): Promise<string | null>;
+  /** The session logs a CLI has written in `cwd` since `since`, with when each last changed (core/session-ids.ts). */
+  sessionLogs?(opts: { kind: ReplyLog; cwd: string; since: number }): Promise<SessionLog[]>;
   kill(ptyId: string): Promise<void>;
   /** Turns syncing a saved agent or skill with the paired machines on or off (Settings → Sync). */
   syncLibrary?(kind: "agent" | "skill", id: string, on: boolean): Promise<void>;
@@ -113,8 +128,27 @@ export interface DeskHost {
   autostart?: { get(): boolean; set(on: boolean): boolean };
   /** Write a privacy-safe single-line Viby diagnostic event to the app log (never prompts or output). */
   logDiagnostics?(line: string): void;
+  /** Write a non-fatal warning to the app log (never prompts or output). */
+  logWarn?(line: string): void;
   /** Desktop + app UI computer-use observation and control driver. */
   computer?: ComputerUseDriver;
+  /** An agent proposed a line for its memory (`vibeforge remember`); it waits for the person to keep or drop it. */
+  memoryProposed?(item: { agentId: string; agentName: string; note: string; flagged: boolean; waiting: number }): void;
+}
+
+/** A run the last close of VibeForge cut off, as the window offers it back. */
+export interface CutOffRun {
+  runId: string;
+  title: string;
+  origin: RunOrigin;
+  engine: string;
+  workspaceId: string | null;
+  /** The Code pane it ran in, when it ran in one. */
+  paneId: string | null;
+  chatId: string | null;
+  taskId: string | null;
+  /** Its exact session is known, so Continue reopens that one and not the folder's latest. */
+  exact: boolean;
 }
 
 export interface DeskOptions {
@@ -154,6 +188,10 @@ export interface RoutineInput {
   schedule: Schedule;
   prompt?: string;
   notify?: boolean;
+  /** Per-run time limit in minutes; null for none. Left out: a new routine gets 120, a saved one keeps its own. */
+  timeoutMinutes?: number | null;
+  /** Work in a separate git worktree of the agent's folder. */
+  isolated?: boolean;
   /** Start even while another coding CLI is busy in the agent's folder. */
   shareCheckout?: boolean;
 }
@@ -184,14 +222,22 @@ export interface RoutineView extends Routine {
   agentName: string | null;
   issues: string[];
   stillRunning: boolean;
+  /** True when a live run of this routine stopped on a question and stayed open for the person. */
+  needsInput: boolean;
   description: string;
   nextFires: string[];
   lastRun: RunView | null;
+  /** Recent runs for this routine, newest first, for the routine's run list. */
+  recentRuns: RunView[];
+  /** False when the routine file points its copy somewhere other than its own worktree. */
+  copyOwned: boolean;
+  /** Name of the routine's target workspace or folder, for Apply labels. */
+  workspaceName: string | null;
   /** Its latest runs that failed in a row. */
   failStreak: number;
   /** Failed often enough in a row (ROUTINE_FAILING) to glow on Routines and Home. */
   failing: boolean;
-  /** Other coding CLIs in the routine's folder right now. */
+  /** Other coding CLIs in the routine's folder right now (none when `isolated` is on). */
   writers: Writer[];
   /** A due slot or Run now waiting for the folder, and who it waits for. */
   waiting: Waiting | null;
@@ -217,6 +263,7 @@ export interface ChatView extends ChatRecord {
 export interface RunBundle {
   run: RunView;
   files: RunFiles;
+  restore: RunRestoreAvailability;
 }
 
 export interface Launched {
@@ -260,6 +307,14 @@ export interface Deleted {
   /** A task's copy was left on disk because its path wasn't the task's own worktree. */
   copyLeft?: boolean;
 }
+
+/**
+ * Result of `vibeforge remember "<one line>"` from an agent's terminal: the line is proposed, and
+ * waits for the person. `already` says it was there before (waiting, or in memory) and wasn't added again.
+ */
+export type RememberResult =
+  | { ok: true; agent: string; note: string; flagged: boolean; waiting: number; already?: "waiting" | "memory" }
+  | { ok: false; error: string };
 
 /** Written on a patch that could not be taken at exit, because the app was already gone. */
 export const LATE_PATCH_NOTE = "# Saved when VibeForge next opened, because it closed during this run.\n";

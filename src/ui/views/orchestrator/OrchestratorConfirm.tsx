@@ -2,6 +2,7 @@ import { GitBranch, Pencil, Play, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { Engine, OrchestratorStep, OrchestratorTurn, StepIssue, StepPatch } from "../../../shared/api.js";
 import { cleanModel, effortLevels, launchKind, takesModel } from "../../../shared/launch-options.js";
+import { copySetupChange, type CopySetupChange } from "../../../shared/copy-setup.js";
 import { KNOWN_MODELS, plannedId, stepIssue, withPlannedWorkspaces } from "../../../shared/orchestrator.js";
 import { call, useEngines, useLive, useOrchestrator, useWorkspaces } from "../../api.js";
 import { tipProps } from "../../components/Tooltip.js";
@@ -97,13 +98,40 @@ function PendingStepSummary({ step }: { step: OrchestratorStep }) {
     text = step.name || step.asked || step.prompt || step.kind;
   }
 
+  const copySetup = copySetupChange(step);
   return (
-    <div className="viby-pending-item">
+    <div className={`viby-pending-item${copySetup ? " wide" : ""}`}>
       <Chip tone="accent">{text}</Chip>
       {step.kind === "start" && step.branch && step.dirty ? (
         <span className="orch-warn">{t.count("orch.dirty", step.dirty, { workspace: workspace?.name ?? "" })}</span>
       ) : null}
+      {copySetup && <CopySetupLines change={copySetup} />}
     </div>
+  );
+}
+
+/**
+ * What a copy-setup step changes, line by line, so Go is pressed knowing the command every new
+ * copy will run and what it brings along. `withCommand` false leaves the command to the box below.
+ */
+export function CopySetupLines({ change, withCommand = true }: { change: CopySetupChange; withCommand?: boolean }) {
+  const t = useT();
+  const list = (items: string[]) => (items.length ? items.join("  ") : t("orch.copyNone"));
+  const rows: Array<[string, string, boolean]> = [];
+  if (change.files !== undefined) rows.push([t("orch.copyFiles"), change.files === null ? t("orch.copyFilesDefault") : list(change.files), Boolean(change.files?.length)]);
+  if (change.folders !== undefined) rows.push([t("orch.copyFolders"), list(change.folders), change.folders.length > 0]);
+  if (change.worktreeInclude !== undefined) rows.push([t("orch.copyInclude"), change.worktreeInclude ? t("orch.copyIncludeOn") : t("orch.copyIncludeOff"), false]);
+  if (withCommand && change.command !== undefined) rows.push([t("orch.copyCommand"), change.command || t("orch.copyRemoved"), Boolean(change.command)]);
+  if (!rows.length) return null;
+  return (
+    <dl className="orch-copy-setup">
+      {rows.map(([label, value, code]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd className={code ? "mono" : undefined}>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -234,7 +262,9 @@ function EditableStepRow({
     );
   }
 
+  const copySetup = copySetupChange(step);
   const showPromptBox =
+    Boolean(copySetup) ||
     step.kind === "start" ||
     step.kind === "tell" ||
     step.kind === "shell" ||
@@ -250,11 +280,13 @@ function EditableStepRow({
     <div className={`orch-step${issue ? " has-issue" : ""}`}>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         {controls}
+        {copySetup && <CopySetupLines change={copySetup} withCommand={false} />}
         {showPromptBox && (
           <PromptBox
             value={step.prompt}
-            label={t("orch.prompt")}
-            placeholder={step.kind === "start" || step.kind === "shell" ? t("orch.promptEmpty") : undefined}
+            label={copySetup ? t("orch.copyCommand") : t("orch.prompt")}
+            mono={Boolean(copySetup)}
+            placeholder={copySetup ? t("orch.copyCommandUnchanged") : step.kind === "start" || step.kind === "shell" ? t("orch.promptEmpty") : undefined}
             onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })}
           />
         )}
@@ -413,11 +445,13 @@ function PromptBox({
   value,
   label,
   placeholder,
+  mono,
   onDone,
 }: {
   value: string;
   label: string;
   placeholder?: string;
+  mono?: boolean;
   onDone: (text: string) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -443,7 +477,7 @@ function PromptBox({
   return (
     <textarea
       ref={ref}
-      className="orch-prompt"
+      className={`orch-prompt${mono ? " mono" : ""}`}
       value={text}
       aria-label={label}
       placeholder={placeholder}

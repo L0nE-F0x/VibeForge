@@ -53,12 +53,12 @@ control_sock() {
   printf '%s\n' "$dir/vibeforge-$tag.sock"
 }
 
-# `vibeforge tell|who|task|apply …`, from a coding CLI in a VibeForge terminal: talk to the other CLIs
+# `vibeforge tell|who|task|apply|remember …`, from a coding CLI in a VibeForge terminal: talk to the other CLIs
 # through the running window. scripts/talk.mjs has the details (`vibeforge help`). Every command it
 # takes is listed here: one that isn't would start a second window, which quits at once
 # (tests/unit/launcher.test.ts checks).
 case "${1:-}" in
-  tell | who | task | apply | help | --help | -h)
+  tell | who | task | apply | remember | help | --help | -h)
     [[ "${NODE[0]}" == node || -x "$ELECTRON" ]] || { echo "vibeforge: neither node nor VibeForge's Electron was found" >&2; exit 1; }
     VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec "${NODE[@]}" "$ROOT/scripts/talk.mjs" "$@"
     ;;

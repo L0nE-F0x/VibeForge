@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
-// `vibeforge tell`, `vibeforge who`, `vibeforge task` and `vibeforge apply`: coding CLIs in VibeForge's terminals
-// talking to each other through the running window's control socket. One JSON line goes in, one
+// `vibeforge tell`, `vibeforge who`, `vibeforge task`, `vibeforge apply` and `vibeforge remember`: coding CLIs in VibeForge's terminals
+// talking to each other (and agents proposing lines for their memory) through the running window's control socket. One JSON line goes in, one
 // comes back. The window knows which terminal asked from VIBEFORGE_PTY, which it sets in each one.
 import net from "node:net";
 
@@ -31,6 +31,12 @@ const USAGE = `Talk to the other coding CLIs open in VibeForge.
       Bring a task you handed out into your folder as uncommitted changes, ending its
       session. Only when Settings → Agents together lets the CLI that handed it out.
 
+  vibeforge remember "<one line>"
+      Propose a line for your agent's memory: lessons about this agent's work,
+      preferences and decisions that should still matter next week (not progress notes,
+      not secrets). It waits for the person to keep or drop it; only kept lines reach
+      later runs. Agent runs only; up to 10 per run.
+
 Two CLIs may send each other a limited number of messages before a person has to
 press Enter on the next one (Settings → Agents together). Exit codes: 0 done,
 1 refused or failed, 2 usage, 3 still waiting for an answer.`;
@@ -54,8 +60,9 @@ async function readStdin() {
 /**
  * Flags anywhere, the first word after the command as the target, the rest as the text.
  * @param {string[]} args
+ * @param {boolean} [allowOptions]
  */
-function parse(args) {
+function parse(args, allowOptions = true) {
   /** @type {{ wait: boolean, start: boolean, title: string | undefined, timeout: number | undefined }} */
   const flags = { wait: false, start: true, title: undefined, timeout: undefined };
   const words = [];
@@ -65,14 +72,36 @@ function parse(args) {
       words.push(...args.slice(i + 1));
       break;
     }
-    if (arg === "--wait") flags.wait = true;
-    else if (arg === "--no-start") flags.start = false;
-    else if (arg === "--title") flags.title = args[++i];
-    else if (arg === "--timeout") flags.timeout = Number(args[++i]);
-    else if (arg.startsWith("--title=")) flags.title = arg.slice(8);
-    else if (arg.startsWith("--timeout=")) flags.timeout = Number(arg.slice(10));
-    else if (arg.startsWith("--") && words.length === 0) fail(`unknown option ${arg}\n\n${USAGE}`, 2);
-    else words.push(arg);
+    if (allowOptions) {
+      if (arg === "--wait") {
+        flags.wait = true;
+        continue;
+      }
+      if (arg === "--no-start") {
+        flags.start = false;
+        continue;
+      }
+      if (arg === "--title") {
+        flags.title = args[++i];
+        continue;
+      }
+      if (arg === "--timeout") {
+        flags.timeout = Number(args[++i]);
+        continue;
+      }
+      if (arg.startsWith("--title=")) {
+        flags.title = arg.slice(8);
+        continue;
+      }
+      if (arg.startsWith("--timeout=")) {
+        flags.timeout = Number(arg.slice(10));
+        continue;
+      }
+      if (arg.startsWith("--") && words.length === 0) fail(`unknown option ${arg}\n\n${USAGE}`, 2);
+    } else if (words.length === 0 && args.length > 1 && arg.startsWith("--") && !/\s/.test(arg)) {
+      fail(`unknown option ${arg}\n\n${USAGE}`, 2);
+    }
+    words.push(arg);
   }
   if (flags.timeout !== undefined && !(flags.timeout > 0)) fail("--timeout takes a number of minutes", 2);
   return { flags, words };
@@ -119,7 +148,7 @@ if (!command || command === "help" || command === "--help" || command === "-h") 
 const pty = process.env.VIBEFORGE_PTY || null;
 const ptyToken = process.env.VIBEFORGE_PTY_TOKEN || undefined;
 const auth = ptyToken ? { pty, ptyToken } : { pty };
-const { flags, words } = parse(rest);
+const { flags, words } = parse(rest, command !== "remember");
 const timeoutMs = flags.timeout ? Math.round(flags.timeout * 60_000) : undefined;
 
 try {
@@ -146,6 +175,20 @@ try {
     if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
     process.stdout.write(`${answer.files.length ? `Applied ${answer.files.join(", ")}. ` : ""}${answer.note}\n`);
     process.exit(answer.conflicts.length ? 1 : 0);
+  }
+  if (command === "remember") {
+    let text = words.join(" ");
+    if (text === "-" || (!words.length && !process.stdin.isTTY)) text = await readStdin();
+    if (!words.length && !text) fail(`remember needs one line to propose\n\n${USAGE}`, 2);
+    const answer = await ask({ op: "remember", ...auth, text });
+    if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
+    if (answer.already === "memory") process.stdout.write(`Already in ${answer.agent}'s memory: ${answer.note}\n`);
+    else {
+      const head = answer.already === "waiting" ? "Already proposed" : "Proposed";
+      const flag = answer.flagged ? " It has a command, link or instruction in it, which the person is shown." : "";
+      process.stdout.write(`${head} for ${answer.agent}'s memory: ${answer.note}\nIt waits for the person to keep or drop it in VibeForge (Agents → ${answer.agent} → Memory); it is not in your memory until then.${flag}\n`);
+    }
+    process.exit(0);
   }
   if (command !== "tell" && command !== "task") fail(`unknown command ${command}\n\n${USAGE}`, 2);
   const [target, ...message] = words;

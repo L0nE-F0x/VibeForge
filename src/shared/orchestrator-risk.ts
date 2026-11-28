@@ -3,6 +3,7 @@
 
 import type { OrchestratorMode } from "../core/types.js";
 import { isReadOnlyComputerAction, normalizeComputerAction, validateKeyCombo, type ComputerActionKind } from "./computer-use.js";
+import { copySetupChange, copySetupNeedsGo } from "./copy-setup.js";
 import { isDestructiveStepAction, parseOptions } from "./orchestrator-actions.js";
 import { isFreeWaitingPrompt, isLoopbackUrl, isSafeShellCommand, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
 import { resolveSettingsStep } from "./orchestrator-settings.js";
@@ -226,6 +227,12 @@ export function classifyStepRisk(step: OrchestratorStep, context: PlanContext | 
   }
   if (isDestructiveStepAction(step.kind, step.action)) {
     return { risk: "high", category: destructiveCategory(step), reason: "Destructive or high-impact operation" };
+  }
+  const copySetup = copySetupChange(step);
+  if (copySetupNeedsGo(copySetup)) {
+    return copySetup?.command
+      ? { risk: "high", category: "unsafe-shell", reason: "Sets a workspace's copy setup command" }
+      : { risk: "high", category: "outward-or-privilege", reason: "Brings more files or folders into a workspace's copies" };
   }
   if (step.kind === "start") {
     if (!step.prompt.trim()) {
