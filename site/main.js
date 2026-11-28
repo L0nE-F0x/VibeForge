@@ -734,8 +734,8 @@ function setupPausing() {
 
 const CAPTIONS = [
   ["Home", "Live terminals, waiting CLIs, diffs to review and upcoming scheduled runs. A run on your local model says which model it used."],
-  ["Code", "Tiled shells and coding CLIs alongside your file tree and browser."],
-  ["Tasks", "Queue tasks to run in separate git worktrees, then apply diffs."],
+  ["Code", "Tiled shells and coding CLIs alongside your file tree and browser. After a restart, a pane where a CLI was working offers to continue its session."],
+  ["Tasks", "Queue tasks to run in separate git worktrees, then review the changes file by file and apply the files you tick."],
   ["Viby", "Here Viby plans on a local model. Paste a screenshot, let Viby click where you allow it, or start a voice call. Viby plans the branches and verifies the tests."],
 ];
 
