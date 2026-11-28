@@ -403,7 +403,7 @@ export function orchestratorRules(context: PlanContext): string {
     "",
     "Steps:",
     "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id, or agent name; leave empty only to use the default CLI when marked [default]), agent (optional explicit saved agent name/id, including one created earlier in this plan), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI; empty when only opening it), branch (short kebab-case; by default works on a new branch in its own review copy), inPlace (true to work directly in the workspace folder with no copy), model and effort (only when asked).",
-    `- workspace: make a new workspace. Also manages existing workspaces via action: "create" (default — fields: workspace/name, folder optional defaulting to ${projects}/<name>, git: true to git init), "rename" (target/workspace + name), "remove" (target/workspace — removes from VibeForge, keeps files on disk), or "move" (target/workspace + status/prompt as "top", "bottom", "up", "down", or position number).`,
+    `- workspace: make a new workspace. Also manages existing workspaces via action: "create" (default — fields: workspace/name, folder optional defaulting to ${projects}/<name>, git: true to git init), "rename" (target/workspace + name), "remove" (target/workspace — removes from VibeForge, keeps files on disk), "move" (target/workspace + status/prompt as "top", "bottom", "up", "down", or position number), or "copy-setup" (target/workspace + options JSON/key=value with files, folders e.g. node_modules, setupCommand — setting setupCommand always waits for Go).`,
     "- agent: create, edit, delete, or manage saved VibeForge agents. action: \"create\" (fields: name, engine [CLI id; uses default if omitted], prompt [agent's brief/instructions], places [array of workspace names or folder paths; or workspace/folder], skills [optional array of skill names/ids], description [optional one-line goodAt], options [optional key=value: allowRoutines=true|false, tier=fast|everyday|strong, sync=on|off to sync it (with its skills and memory) with the paired machines]), \"edit\" (target + any fields to update), \"add-folder\" / \"remove-folder\" (target + places/workspace/folder), \"add-skill\" / \"remove-skill\" (target + skills), \"memory-append\" / \"memory-set\" (target + prompt), \"memory-clear\" (target), or \"delete\" (target). Newly created agents can be referenced by name in later steps of the same plan!",
     "- skill: create, edit, delete skills or manage which agents have them. action: \"create\" (fields: name, description [short summary], prompt [SKILL.md markdown instructions], agents [optional array of agent names/ids to attach immediately], options [optional: sync=on|off to sync it with the paired machines]), \"edit\" (target + any of name/description/prompt/agents), \"attach\" / \"detach\" / \"set-agents\" (target + agents array; use options \"agents=none\" with set-agents to clear all), or \"delete\" (target). Newly created skills can be referenced by name in later steps of the same plan!",
     "- routine: manage scheduled routines. action: \"create\" (fields: name, agent [saved agent name/id, or inherited from task], task [optional existing or planned task name/id to attach its prompt and agent], schedule [5-field cron like \"0 9 * * 1-5\", interval like \"every 30 minutes\" / \"every 2 hours\", or natural phrase like \"weekdays at 9am\" / \"daily at 6pm\" / \"every Monday at 10am\"], prompt [instructions, or inherited from attached task], options [optional: enabled=true|false, notify=true|false, shareCheckout=true|false]), \"edit\" (target + any fields to change, including schedule, agent, task, name, prompt, options), \"delete\" (target), \"run\" (target — waits turn if folder busy), \"run-now\" (target — force start past busy folder), \"enable\" / \"disable\" (target), or \"cancel-wait\" (target).",
@@ -898,12 +898,15 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
         const ws = findWorkspace(item.target || item.workspace);
         const nextName = (item.name || (action === "rename" ? item.prompt : "") || "").trim();
         const pos = (item.status || (action === "move" ? item.prompt : "") || parseOptions(item.options).str("index") || "").trim();
+        const setupPrompt = action === "copy-setup" ? (item.prompt ?? "").trim() : "";
         const label =
           action === "rename"
             ? [ws?.name || item.target || item.workspace, nextName].filter(Boolean).join(" → ")
             : action === "move"
               ? [ws?.name || item.target || item.workspace, pos].filter(Boolean).join(" · ")
-              : ws?.name || item.target || item.workspace || "";
+              : action === "copy-setup"
+                ? [ws?.name || item.target || item.workspace, "copy setup"].filter(Boolean).join(" · ")
+                : ws?.name || item.target || item.workspace || "";
         if (action === "rename") noteRename(ws?.id, nextName);
         steps.push({
           ...base,
@@ -913,7 +916,7 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
           ...(nextName ? { name: nextName } : {}),
           ...(pos ? { status: pos } : {}),
           ...(item.options ? { options: item.options } : {}),
-          prompt: "",
+          prompt: setupPrompt,
           asked: label,
         });
       }

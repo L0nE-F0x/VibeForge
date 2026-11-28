@@ -365,7 +365,7 @@ export type AgentAction = "create" | "edit" | "delete" | "add-folder" | "remove-
 export type RoutineStepAction = "create" | "edit" | "delete" | "run" | "run-now" | "enable" | "disable" | "cancel-wait";
 export type TaskStepAction = "create" | "create-run" | "edit" | "delete" | "run" | "run-now" | "continue" | "stop" | "status" | "cancel-wait" | "apply" | "discard" | "handoff";
 export type SkillAction = "create" | "edit" | "delete" | "attach" | "detach" | "set-agents";
-export type WorkspaceAction = "create" | "rename" | "remove" | "move";
+export type WorkspaceAction = "create" | "rename" | "remove" | "move" | "copy-setup";
 export type ChatAction = "create" | "send" | "continue" | "stop" | "rename" | "set-engine" | "delete";
 export type RunAction = "continue" | "stop" | "mark-reviewed" | "mark-unreviewed" | "mark-all-reviewed" | "handoff" | "copy-markdown" | "tidy";
 export type TalkAction = "review" | "send-draft" | "stop" | "start-tasks";
@@ -471,7 +471,16 @@ export function normalizeWorkspaceAction(rawAction: string | undefined): Workspa
   if (/^(?:rename|update|edit)$/.test(key)) return "rename";
   if (/^(?:remove|delete|drop|close)$/.test(key)) return "remove";
   if (/^(?:move|reorder|position)$/.test(key)) return "move";
+  if (/^(?:copysetup|setup|whenacopyismade|worktreesetup|setcopysetup|configurecopy)$/.test(key)) return "copy-setup";
   return null;
+}
+
+/** Whether a workspace step sets or changes a copy setup command (always waits for Go). */
+export function workspaceStepSetsCommand(step: { kind: string; action?: string; prompt?: string; options?: string }): boolean {
+  if (step.kind !== "workspace" || normalizeWorkspaceAction(step.action) !== "copy-setup") return false;
+  if (Boolean(step.prompt?.trim())) return true;
+  const opts = parseOptions(step.options);
+  return opts.has("setupCommand") || opts.has("command");
 }
 
 export function normalizeChatAction(rawAction: string | undefined, hasTarget: boolean, hasPrompt: boolean): ChatAction | null {

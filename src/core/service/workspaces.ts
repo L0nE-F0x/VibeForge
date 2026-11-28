@@ -1,10 +1,11 @@
 import path from "node:path";
 import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
+import { normalizeCopySetup } from "../copy-setup.js";
 import { isDirectory } from "../fsx.js";
 import { LOCAL_ENGINE_ID } from "../local.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
-import type { LayoutNode, Workspace, WorkspaceCategory } from "../types.js";
+import type { LayoutNode, Workspace, WorkspaceCategory, WorkspaceCopySetup } from "../types.js";
 import { replyLogFor } from "../replies.js";
 import { resumeCommand } from "../session-ids.js";
 import { summarizeFolderGit } from "../vcs.js";
@@ -176,8 +177,8 @@ export class WorkspaceDesk {
     return workspace;
   }
 
-  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }): WorkspaceFile {
-    const clean: { name?: string; dockUrl?: string; categories?: string[] } = {};
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[]; copySetup?: WorkspaceCopySetup | null }): WorkspaceFile {
+    const clean: { name?: string; dockUrl?: string; categories?: string[]; copySetup?: WorkspaceCopySetup | null } = {};
     if (typeof patch.name === "string" && patch.name.trim()) clean.name = patch.name.trim();
     if (typeof patch.dockUrl === "string") {
       const url = patch.dockUrl.trim();
@@ -186,6 +187,9 @@ export class WorkspaceDesk {
     }
     if (Array.isArray(patch.categories)) {
       clean.categories = patch.categories.filter((item): item is string => typeof item === "string");
+    }
+    if (patch.copySetup !== undefined) {
+      clean.copySetup = normalizeCopySetup(patch.copySetup) ?? null;
     }
     const next = updateWorkspaceRecord(this.core.store.readWorkspaces(), id, clean);
     this.core.store.writeWorkspaces(next);
@@ -385,6 +389,7 @@ export class WorkspaceDesk {
       /** The exact earlier run to pick back up (one a close cut off). */
       continueRun?: string;
       orchestrated?: boolean;
+      setupCommand?: string | null;
       model?: string;
       effort?: string;
     } & TermSize,
@@ -425,6 +430,7 @@ export class WorkspaceDesk {
       paneId: opts.paneId ?? null,
       ...(agent ? { instructions: null, allowVibeforge: Boolean(this.core.store.readSettings().agentTalk.on) } : this.paneInstructions(engine.row.id, workspace.path)),
       orchestrated: opts.orchestrated,
+      setupCommand: opts.setupCommand,
       model: target.model,
       effort: opts.effort,
       cols: opts.cols,

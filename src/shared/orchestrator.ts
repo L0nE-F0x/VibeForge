@@ -227,6 +227,7 @@ export interface MaestroCopy {
   branch: string;
   base: string;
   repo: string;
+  seeded?: string[];
 }
 
 /** The fields a plan card can change on a step before Go. */
@@ -606,6 +607,11 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
       if (!pos) return "prompt";
       if (/^(?:top|first|bottom|last|up|down|\d+)$/.test(pos)) return null;
       return "prompt";
+    }
+    if (action === "copy-setup") {
+      const opts = parseOptions(step.options);
+      const hasAny = Boolean(step.prompt?.trim()) || opts.has("files") || opts.has("folders") || opts.has("setupCommand") || opts.has("command");
+      return hasAny ? null : "prompt";
     }
     return null;
   }

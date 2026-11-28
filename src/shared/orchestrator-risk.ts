@@ -3,7 +3,7 @@
 
 import type { OrchestratorMode } from "../core/types.js";
 import { isReadOnlyComputerAction, normalizeComputerAction, validateKeyCombo, type ComputerActionKind } from "./computer-use.js";
-import { isDestructiveStepAction, parseOptions } from "./orchestrator-actions.js";
+import { isDestructiveStepAction, parseOptions, workspaceStepSetsCommand } from "./orchestrator-actions.js";
 import { isFreeWaitingPrompt, isLoopbackUrl, isSafeShellCommand, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
 import { resolveSettingsStep } from "./orchestrator-settings.js";
 import type { OrchestratorStep, OrchestratorStepKind, PlanContext } from "./orchestrator.js";
@@ -226,6 +226,9 @@ export function classifyStepRisk(step: OrchestratorStep, context: PlanContext | 
   }
   if (isDestructiveStepAction(step.kind, step.action)) {
     return { risk: "high", category: destructiveCategory(step), reason: "Destructive or high-impact operation" };
+  }
+  if (workspaceStepSetsCommand(step)) {
+    return { risk: "high", category: "unsafe-shell", reason: "Changes a workspace copy setup command" };
   }
   if (step.kind === "start") {
     if (!step.prompt.trim()) {

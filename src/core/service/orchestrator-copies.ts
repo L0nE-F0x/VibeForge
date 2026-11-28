@@ -7,7 +7,7 @@ import { isPathInside } from "../places.js";
 import { isSafeId } from "../slug.js";
 import type { Workspace } from "../types.js";
 import { removeWorkspaceRecord } from "../workspaces.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, expectedCopyPath, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, expectedCopyPath, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
 import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
@@ -95,7 +95,7 @@ export class MaestroCopies {
    * named for the branch the plan asked for, and its own workspace (not the one Code shows).
    * Copies on distinct repositories can be created in parallel while same-repo git worktree writes serialize cleanly.
    */
-  async make(input: { turnId: string; stepId: string; engineId: string; prompt: string; branch: string; workspace: Workspace }): Promise<MaestroCopy & { openedWorkspaceId: string }> {
+  async make(input: { turnId: string; stepId: string; engineId: string; prompt: string; branch: string; workspace: Workspace }): Promise<MaestroCopy & { openedWorkspaceId: string; setupCommand: string | null }> {
     const name = cleanBranch(input.branch) || "maestro";
     const id = await this.serial(async () => {
       const picked = await this.freeId(input.workspace.path, name);
@@ -104,7 +104,12 @@ export class MaestroCopies {
     });
     try {
       return await this.perRepo(input.workspace.path, async () => {
-        const made = await createCopy(input.workspace.path, path.join(this.core.options.dataRoot, "worktrees", id), copyBranch(id));
+        const { copy: made, setupCommand } = await prepareCopy({
+          folder: input.workspace.path,
+          target: path.join(this.core.options.dataRoot, "worktrees", id),
+          branch: copyBranch(id),
+          copySetup: input.workspace.copySetup,
+        });
         const copy: MaestroCopy = {
           id,
           turnId: input.turnId,
@@ -123,7 +128,7 @@ export class MaestroCopies {
         const openedWorkspaceId = this.workspaces.addQuietly(folderInCopy(made, input.workspace.path), `${input.workspace.name} · ${name}`);
         copy.openedWorkspaceId = openedWorkspaceId;
         this.save();
-        return { ...copy, openedWorkspaceId };
+        return { ...copy, openedWorkspaceId, setupCommand };
       });
     } finally {
       this.reservedIds.delete(id);
@@ -261,6 +266,7 @@ function readCopy(value: unknown): MaestroCopy | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
   const text = (key: string) => (typeof item[key] === "string" ? (item[key] as string) : "");
+  const seeded = Array.isArray(item.seeded) ? item.seeded.filter((s): s is string => typeof s === "string") : [];
   const copy: MaestroCopy = {
     id: text("id"),
     turnId: text("turnId"),
@@ -275,6 +281,7 @@ function readCopy(value: unknown): MaestroCopy | null {
     branch: text("branch"),
     base: text("base"),
     repo: text("repo"),
+    ...(seeded.length ? { seeded } : {}),
   };
   return copy.id && copy.workspaceId && copy.path && copy.branch && copy.base && copy.repo ? copy : null;
 }

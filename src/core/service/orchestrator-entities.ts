@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { effortForModel } from "../../shared/launch-options.js";
+import { cleanCopyFolderPath } from "../copy-setup.js";
 import { isDirectory } from "../fsx.js";
 import { LOCAL_ENGINE_ID, localModeRoutesViby } from "../../shared/local.js";
 import {
@@ -25,6 +26,7 @@ import {
   PLANNED_PREFIX,
   plannedId,
   resolveSettingsStep,
+  workspaceStepSetsCommand,
   type OrchestratorStep,
   type OrchestratorTurn,
   type PlanContext,
@@ -98,7 +100,7 @@ async function makeWorkspace(deps: EntityStepDeps, step: OrchestratorStep): Prom
   return id;
 }
 
-export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: OrchestratorTurn, step: OrchestratorStep, auto = false): Promise<void> {
   const action = normalizeWorkspaceAction(step.action);
   if (!action || action === "create") {
     const workspaceId = await makeWorkspace(deps, step);
@@ -140,6 +142,37 @@ export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: Orchestr
     deps.workspaces.moveWorkspace(ws.id, toIndex);
     step.openedWorkspaceId = ws.id;
     step.result = `Moved ${ws.name} to position ${toIndex + 1}.`;
+    return;
+  }
+  if (action === "copy-setup") {
+    if (auto && workspaceStepSetsCommand(step)) {
+      throw new Error("Changing a workspace's copy setup command waits for Go.");
+    }
+    const opts = parseOptions(step.options);
+    const next = { ...(ws.copySetup ?? {}) };
+    if (opts.has("files")) {
+      const rawFiles = (opts.str("files") ?? "").trim();
+      if (!rawFiles || isClearWord(rawFiles)) next.files = rawFiles.toLowerCase() === "default" ? undefined : [];
+      else next.files = rawFiles.split(/[\s,;]+/).filter(Boolean);
+    }
+    if (opts.has("folders")) {
+      const rawFolders = (opts.str("folders") ?? "").trim();
+      if (!rawFolders || isClearWord(rawFolders)) delete next.folders;
+      else {
+        next.folders = rawFolders
+          .split(/[\s,;]+/)
+          .map((item) => cleanCopyFolderPath(item))
+          .filter((item): item is string => item !== null);
+      }
+    }
+    if (step.prompt.trim() || opts.has("setupCommand") || opts.has("command")) {
+      const cmd = (step.prompt.trim() || opts.str("setupCommand") || opts.str("command") || "").trim();
+      if (!cmd || isClearWord(cmd)) delete next.setupCommand;
+      else next.setupCommand = cmd;
+    }
+    deps.workspaces.updateWorkspace(ws.id, { copySetup: next });
+    step.openedWorkspaceId = ws.id;
+    step.result = `Updated copy setup for ${ws.name}.`;
     return;
   }
   throw new Error("Unsupported action.");

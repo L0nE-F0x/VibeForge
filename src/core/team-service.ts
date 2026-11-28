@@ -259,7 +259,7 @@ export class TeamService extends ServiceCore {
     return this.workspaces.moveWorkspace(id, toIndex);
   }
 
-  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }): WorkspaceFile {
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[]; copySetup?: import("./types.js").WorkspaceCopySetup | null }): WorkspaceFile {
     return this.workspaces.updateWorkspace(id, patch);
   }
 

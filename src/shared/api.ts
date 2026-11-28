@@ -56,6 +56,7 @@ import type {
   LibraryKind,
   VoiceSettings,
   WorkspaceCategory,
+  WorkspaceCopySetup,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
 import type { LocalModelInfo, LocalRuntimeStatus, LocalServerKind, LocalServerProbe } from "../core/local.js";
@@ -174,7 +175,7 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile, CutOff } from "../core/types.js";
+export type { Workspace, WorkspaceCategory, WorkspaceCopySetup, RunOrigin, RunStatus, PaneLaunch, UnreadableFile, CutOff } from "../core/types.js";
 export type { CutOffRun } from "../core/team-service.js";
 
 /** Partial settings patch supporting nested partial updates for `companion` and `local`. */
@@ -479,7 +480,7 @@ export interface DeskMethods {
   "workspaces.remove": (id: string) => Deleted;
   "workspaces.select": (id: string) => void;
   "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
-  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }) => WorkspaceFile;
+  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string; categories?: string[]; copySetup?: WorkspaceCopySetup | null }) => WorkspaceFile;
   "workspaces.addCategory": (name: string) => { file: WorkspaceFile; category: WorkspaceCategory };
   "workspaces.renameCategory": (id: string, name: string) => WorkspaceFile;
   "workspaces.moveCategory": (id: string, toIndex: number) => WorkspaceFile;

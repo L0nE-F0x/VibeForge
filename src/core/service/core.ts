@@ -15,6 +15,7 @@ import { failStreak, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
 import type { Agent, CutOff, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
 import { readCutOff, settleCutOff, writeCutOff, type CutOffNote } from "../cut-off.js";
+import { wrapWithSetupCommand } from "../copy-setup.js";
 import { removeCopy, type WorkingCopy } from "../worktrees.js";
 import { type CutOffRun, type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
@@ -585,6 +586,8 @@ export class ServiceCore {
     /** The model and reasoning effort to start the CLI with, where it takes them (launchOptionArgs). */
     model?: string;
     effort?: string;
+    /** Optional per-workspace setup command run visibly in the copy's terminal before the CLI starts. */
+    setupCommand?: string | null;
     cols?: number;
     rows?: number;
   }): Promise<Launched> {
@@ -613,6 +616,7 @@ export class ServiceCore {
       options: launchArgs,
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
+    const spawnArgv = wrapWithSetupCommand(plan.argv, input.setupCommand, this.store.readSettings().defaultShell);
     let gitStart: string | null = null;
     try {
       gitStart = await this.options.host.gitHead(input.cwd);
@@ -660,7 +664,7 @@ export class ServiceCore {
     try {
       spawned = await this.options.host.spawn({
         cwd: input.cwd,
-        argv: plan.argv,
+        argv: spawnArgv,
         ...(input.engine.env && Object.keys(input.engine.env).length ? { env: input.engine.env } : {}),
         runDir: dir,
         pasteInput,

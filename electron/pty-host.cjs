@@ -319,13 +319,32 @@ function clearPasteTimers(paste) {
   clearTimeout(paste.capTimer);
 }
 
+/** @param {Session} session */
+function isSetupWrapperRunning(session) {
+  if (session.argv[1] !== "-c" || session.argv[3] !== "vibeforge-setup") return false;
+  try {
+    const parts = fs.readFileSync(`/proc/${session.pid}/cmdline`, "utf8").split("\0");
+    return parts[1] === "-c" && parts[3] === "vibeforge-setup";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * @param {Session} session
  * @param {string} text
  */
 function armPaste(session, text) {
+  const startTimers = () => {
+    paste.quietTimer = setTimeout(deliver, PASTE_FIRST_OUTPUT_MS);
+    paste.capTimer = setTimeout(deliver, PASTE_MAX_WAIT_MS);
+  };
   const deliver = () => {
     if (paste.done || session.exited) return;
+    if (isSetupWrapperRunning(session)) {
+      paste.capTimer = setTimeout(deliver, 150);
+      return;
+    }
     paste.done = true;
     clearPasteTimers(paste);
     session.paste = null;
@@ -334,8 +353,19 @@ function armPaste(session, text) {
   /** @type {Paste} */
   const paste = { text, quietTimer: undefined, capTimer: undefined, done: false, deliver };
   session.paste = paste;
-  paste.quietTimer = setTimeout(deliver, PASTE_FIRST_OUTPUT_MS);
-  paste.capTimer = setTimeout(deliver, PASTE_MAX_WAIT_MS);
+  if (isSetupWrapperRunning(session)) {
+    const waitForExec = () => {
+      if (paste.done || session.exited) return;
+      if (isSetupWrapperRunning(session)) {
+        paste.capTimer = setTimeout(waitForExec, 150);
+        return;
+      }
+      startTimers();
+    };
+    paste.capTimer = setTimeout(waitForExec, 150);
+    return;
+  }
+  startTimers();
 }
 
 /** @param {Session} session */

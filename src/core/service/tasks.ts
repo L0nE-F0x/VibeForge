@@ -9,7 +9,7 @@ import { createTask, markStopped, requestExecute } from "../tasks.js";
 import type { Task, TaskStatus, Workspace } from "../types.js";
 import { isSafeId } from "../slug.js";
 import type { Bin } from "../trash.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
 import { BLOCKER_TEXT, type Deleted, type Launched, type Queued, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { FolderTurns } from "./turns.js";
@@ -211,7 +211,7 @@ export class TaskDesk {
     const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const prompt = taskPrompt(task.title, task.body);
     const previous = task.runIds[task.runIds.length - 1] ? this.core.store.getRun(task.runIds[task.runIds.length - 1]) : null;
-    const cwd = task.isolated ? await this.copyFor(task, workspace) : workspace.path;
+    const { cwd, setupCommand } = task.isolated ? await this.copyFor(task, workspace) : { cwd: workspace.path, setupCommand: null };
     const resume = continueSession ? this.core.resumePlan(engine, previous, cwd) : { native: false, resumeArgs: null };
     const canContinue = resume.native;
     const prior = continueSession && previous && !canContinue ? this.core.transcriptPath(previous) : null;
@@ -220,6 +220,7 @@ export class TaskDesk {
       title: task.title,
       engine,
       cwd,
+      setupCommand,
       prompt,
       promptText: canContinue ? null : this.core.preambleFor(agent, followUp ? `${prompt}\n\n${followUp}` : prompt, prior, task.isolated ? { path: cwd, of: workspace.path } : null),
       pasteAfter: canContinue ? followUp : null,
@@ -298,18 +299,24 @@ export class TaskDesk {
   }
 
   /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
-  private async copyFor(task: Task, workspace: Workspace): Promise<string> {
+  private async copyFor(task: Task, workspace: Workspace): Promise<{ cwd: string; setupCommand: string | null }> {
     if (task.copy && isDirectory(task.copy.path)) {
       if (!ownedCopyPath(this.owner(task.id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
       if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
-      return folderInCopy(task.copy, workspace.path);
+      return { cwd: folderInCopy(task.copy, workspace.path), setupCommand: null };
     }
     if (!isSafeId(task.id)) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
     // A copy whose folder went (deleted by hand, say) picks its branch's commits back up.
-    const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id), task.copy);
+    const { copy, setupCommand } = await prepareCopy({
+      folder: workspace.path,
+      target: path.join(this.core.options.dataRoot, "worktrees", task.id),
+      branch: copyBranch(task.id),
+      previous: task.copy,
+      copySetup: workspace.copySetup,
+    });
     const current = this.core.store.getTask(task.id) ?? task;
     this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
-    return folderInCopy(copy, workspace.path);
+    return { cwd: folderInCopy(copy, workspace.path), setupCommand };
   }
 
   /**

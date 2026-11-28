@@ -2338,7 +2338,7 @@ export class OrchestratorDesk {
 
   private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep, epoch = this.runEpoch, auto = false): Promise<void> {
     if (step.kind === "workspace") {
-      await carryOutWorkspaceStep(this.entityDeps(), turn, step);
+      await carryOutWorkspaceStep(this.entityDeps(), turn, step, auto);
       return;
     }
     if (step.kind === "agent") {
@@ -2385,6 +2385,7 @@ export class OrchestratorDesk {
       if (agent && !cwdAllowed(workspace.path, agent.places)) throw new Error(`${agent.name} is not allowed in ${workspace.name}.`);
       let workspaceId = workspace.id;
       let copyOf: { path: string; of: string } | null = null;
+      let setupCommand: string | null = null;
       if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
         if (await hasCommit(workspace.path)) {
           // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
@@ -2392,6 +2393,7 @@ export class OrchestratorDesk {
           step.copyId = copy.id;
           step.branch = copy.branch;
           workspaceId = copy.openedWorkspaceId;
+          setupCommand = copy.setupCommand;
           // An agent's brief names its allowed folders: it's told to work in the copy instead.
           const opened = this.core.workspaceById(workspaceId);
           if (opened) copyOf = { path: opened.path, of: workspace.path };
@@ -2401,7 +2403,7 @@ export class OrchestratorDesk {
         }
       }
       step.openedWorkspaceId = workspaceId;
-      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, copyOf, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
+      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, copyOf, prompt: step.prompt, orchestrated: true, setupCommand, model: step.model, effort: step.effort, ...START_SIZE });
       step.ptyId = launched.ptyId;
       step.runId = launched.runId;
       this.followTo(workspaceId, launched.ptyId);
