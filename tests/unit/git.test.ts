@@ -150,3 +150,48 @@ describe("hardened git runner", () => {
     expect(fs.existsSync(pwnExtDiff)).toBe(false);
   });
 });
+
+describe("which refs count as history", () => {
+  // Run snapshots under refs/vibeforge hold uncommitted work. Every walk of "all refs" goes through
+  // HISTORY_REVS, and every `for-each-ref --contains` through HOLDING_REFS, so none treats them as kept.
+  const sources = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return sources(full);
+      return /\.tsx?$/.test(entry.name) ? [full] : [];
+    });
+  const root = path.resolve(__dirname, "../../src");
+  // Viby's list of read-only flags it may pass to git for the person (a list, not a call), and git.ts, which defines the helper.
+  const allowed = new Set([path.join(root, "shared", "orchestrator-intel.ts"), path.join(root, "core", "git.ts")]);
+
+  it("has no git call in src that walks every ref without leaving VibeForge's own out", () => {
+    const offenders: string[] = [];
+    for (const file of sources(root)) {
+      if (allowed.has(file)) continue;
+      const lines = fs.readFileSync(file, "utf8").split("\n");
+      lines.forEach((line, index) => {
+        const where = `${path.relative(root, file)}:${index + 1}`;
+        if (/["'`]--all["'`]/.test(line) && !line.includes("HISTORY_REVS")) offenders.push(where);
+        if (/["'`]for-each-ref["'`]/.test(line) && line.includes("--contains") && !line.includes("HOLDING_REFS")) offenders.push(where);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("leaves nested refs/vibeforge refs out of HISTORY_REVS", async () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "vf-history-"));
+    tempDirs.push(repo);
+    const run = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    run("init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(repo, "a.txt"), "a\n");
+    run("add", "-A");
+    run("commit", "-qm", "a");
+    const tree = run("write-tree");
+    const hidden = run("commit-tree", "-m", "snapshot", tree);
+    run("update-ref", "refs/vibeforge/runs/2026-11-28T100000Z_x/abc/start", hidden);
+    const { HISTORY_REVS } = await import("../../src/core/git.js");
+    expect(run("rev-list", ...HISTORY_REVS)).toBe(run("rev-parse", "HEAD"));
+    expect(run("rev-list", "--all").split("\n")).toContain(hidden);
+  });
+});

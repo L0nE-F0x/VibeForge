@@ -15,6 +15,19 @@ export const HARDENED_GIT_ARGS = [
   "protocol.file.allow=user",
 ] as const;
 
+/**
+ * VibeForge's own refs. Run snapshots live under `refs/vibeforge/` and hold uncommitted and
+ * untracked work, so they are never "history": nothing may treat a file or commit as safely kept
+ * because one of these refs reaches it.
+ */
+export const VIBEFORGE_REFS = "refs/vibeforge/*";
+
+/** What `--all` means wherever VibeForge asks for "every ref that is history": all refs but its own. */
+export const HISTORY_REVS: readonly string[] = [`--exclude=${VIBEFORGE_REFS}`, "--all"];
+
+/** The refs that keep a commit for `for-each-ref --contains`: branches and tags, never VibeForge's own. */
+export const HOLDING_REFS: readonly string[] = ["refs/heads", "refs/tags"];
+
 /** Leading global git options that take a separate value argument before the subcommand. */
 const VALUE_GLOBAL_OPTS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--exec-path", "--config-env"]);
 

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { inHistory, mergeSaved, prepareRepo, repoKind, rescueRepo } from "../../src/core/sync/git-rescue.js";
+import { takeStartSnapshot } from "../../src/core/snapshots.js";
 
 // Real git in throwaway repositories, left in the state Syncthing leaves a synced `.git` in when
 // both machines committed while apart: the other machine's files in place, this machine's as
@@ -365,5 +366,40 @@ describe("sync: a repository on two machines", () => {
     const crlfCopy = path.join(root, `crlf.${STAMP}.txt`);
     fs.writeFileSync(crlfCopy, "line1\r\nline2\r\n");
     expect(await inHistory(root, crlfCopy, "crlf.txt")).toBe(true);
+  });
+  it("never counts VibeForge's run snapshots as history: a conflict copy of uncommitted work is kept", async () => {
+    const root = repo();
+    // Work that was never committed, saved by a run's snapshot (which holds untracked and uncommitted files).
+    write(root, "draft.md", "uncommitted thoughts\n");
+    write(root, "notes.md", "alpha, edited but not committed\n");
+    const runDir = temp();
+    expect(await takeStartSnapshot({ cwd: root, runId: "2026-11-28T100000Z_run", runDir })).not.toBeNull();
+    expect(git(root, "for-each-ref", "--format=%(refname)", "refs/vibeforge").split("\n").filter(Boolean)).toHaveLength(1);
+    // Syncthing's conflict copies of those files hold only that uncommitted text.
+    const draftCopy = path.join(root, `draft.${STAMP}.md`);
+    const notesCopy = path.join(root, `notes.${STAMP}.md`);
+    fs.writeFileSync(draftCopy, "uncommitted thoughts\n");
+    fs.writeFileSync(notesCopy, "alpha, edited but not committed\n");
+    expect(await inHistory(root, draftCopy, "draft.md")).toBe(false);
+    expect(await inHistory(root, notesCopy, "notes.md")).toBe(false);
+    // A committed version still counts.
+    fs.writeFileSync(notesCopy, "alpha\n");
+    expect(await inHistory(root, notesCopy, "notes.md")).toBe(true);
+  });
+
+  it("keeps a detached commit on a branch when only a VibeForge snapshot ref reaches it", async () => {
+    const root = repo();
+    const base = git(root, "rev-parse", "HEAD");
+    git(root, "checkout", "--detach", "-q", base);
+    write(root, "notes.txt", "detached work\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "detached commit");
+    const detached = git(root, "rev-parse", "HEAD");
+    // Only a snapshot ref holds it, as a run that started on this detached HEAD would leave.
+    git(root, "update-ref", "refs/vibeforge/runs/2026-11-28T100000Z_run/abc123/start", detached);
+    git(root, "checkout", "-q", "main");
+    fs.writeFileSync(path.join(root, ".git", `HEAD.${STAMP}`), `${detached}\n`);
+    await rescueRepo(root, "desk");
+    expect(git(root, "rev-parse", "refs/heads/detached-head")).toBe(detached);
   });
 });

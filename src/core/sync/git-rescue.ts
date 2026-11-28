@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { runGit } from "../git.js";
+import { HISTORY_REVS, HOLDING_REFS, runGit } from "../git.js";
 import { withRepoLock } from "../worktrees.js";
 import { conflictName } from "./protocol.js";
 
@@ -260,7 +260,7 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
 
   const keepDetached = async (sha: string): Promise<boolean> => {
     if (!SHA.test(sha) || !(await isCommit(root, sha))) return true;
-    const held = await git(["for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)"], root);
+    const held = await git(["for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)", ...HOLDING_REFS], root);
     if (held.code !== 0) return false;
     if (held.stdout.trim()) return true;
     return keep("refs/heads/detached-head", sha);
@@ -357,7 +357,7 @@ async function blobsAt(root: string, treeish: string, paths: string[]): Promise<
  */
 async function settle(root: string, commit: string): Promise<string[]> {
   // Only when the commit is held by a branch or tag: then putting a file back loses nothing.
-  const held = await git(["for-each-ref", "--count=1", "--contains", commit, "--format=%(refname)"], root);
+  const held = await git(["for-each-ref", "--count=1", "--contains", commit, "--format=%(refname)", ...HOLDING_REFS], root);
   if (held.code !== 0 || !held.stdout.trim()) return [];
   const diff = await git(["diff", "--name-only", "-z", "--no-renames", "HEAD", commit], root);
   if (diff.code !== 0) return [];
@@ -426,18 +426,19 @@ async function normalizedHash(root: string, file: string): Promise<string | null
 
 /**
  * Whether a file's exact content is kept in some commit under the name `relative`: then a conflict
- * copy of it is only that commit's file again, and can go.
+ * copy of it is only that commit's file again, and can go. VibeForge's run snapshots don't count:
+ * they hold work that was never committed.
  */
 export async function inHistory(root: string, file: string, relative: string): Promise<boolean> {
   if (repoKind(root) !== "repo") return false;
   const hashed = await git(["hash-object", "--no-filters", "--", file], root);
   const blob = hashed.stdout.trim();
   if (hashed.code !== 0 || !SHA.test(blob)) return false;
-  const found = await git(["log", "--all", "-1", "--format=%H", `--find-object=${blob}`, "--", relative], root);
+  const found = await git(["log", ...HISTORY_REVS, "-1", "--format=%H", `--find-object=${blob}`, "--", relative], root);
   if (found.code === 0 && SHA.test(found.stdout.trim())) return true;
   const norm = await normalizedHash(root, file);
   if (!norm || norm === blob) return false;
-  const normFound = await git(["log", "--all", "-1", "--format=%H", `--find-object=${norm}`, "--", relative], root);
+  const normFound = await git(["log", ...HISTORY_REVS, "-1", "--format=%H", `--find-object=${norm}`, "--", relative], root);
   return normFound.code === 0 && SHA.test(normFound.stdout.trim());
 }
 
