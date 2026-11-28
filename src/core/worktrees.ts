@@ -49,6 +49,8 @@ export interface ApplyResult {
    * uncommitted edits, or was already up to date.
    */
   pulled?: { branch: string; upstream: string; alreadyUpToDate?: boolean };
+  /** Files left in the copy because only some files were ticked for Apply. */
+  stayed?: number;
 }
 
 interface GitRun {
@@ -521,12 +523,12 @@ export function patchFiles(patch: string): string[] {
  * in; the same lines changed on both sides are left with conflict markers to resolve. Git's own
  * index is never touched, and nothing is committed. Throws when the changes can't go in at all.
  */
-export function applyToWorkspace(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
+export function applyToWorkspace(copy: WorkingCopy, patch: string, options?: { files?: readonly string[] }): Promise<ApplyResult> {
   return withRepoLock(copy.repo, async () => {
     const key = path.resolve(copy.path);
     const staged = stagedTrees.get(key);
     try {
-      return await applyPatch(copy, patch, staged?.patch === patch ? staged.tree : null);
+      return await applyPatch(copy, patch, staged?.patch === patch ? staged.tree : null, options?.files);
     } finally {
       if (stagedTrees.get(key) === staged) stagedTrees.delete(key);
     }
@@ -543,7 +545,7 @@ const MERGE_AUTHOR = {
   GIT_COMMITTER_EMAIL: "vibeforge@localhost",
 };
 
-async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string | null): Promise<ApplyResult> {
+async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string | null, onlyFiles?: readonly string[]): Promise<ApplyResult> {
   if (!patch.trim()) return { files: [], conflicts: [], kept: [] };
   if (!isCommitId(copy.base)) throw new Error("The changes don't apply to the workspace");
   const repo = copy.repo;
@@ -565,19 +567,46 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
     }
     const touched = (await step(["diff-tree", "-r", "-z", "--no-renames", "--name-only", copy.base, theirs])).split("\0").filter(Boolean);
     const statusParts = (await step(["diff-tree", "-r", "-z", "-M", "--name-status", copy.base, theirs])).split("\0");
-    const files: string[] = [];
+    const entries: Array<{ name: string; paths: string[] }> = [];
     for (let i = 0; i + 1 < statusParts.length && statusParts[i]; i += 2) {
-      if (/^[RC]/.test(statusParts[i]) && i + 2 < statusParts.length) {
-        files.push(statusParts[i + 2]);
+      const code = statusParts[i];
+      if (/^[RC]/.test(code) && i + 2 < statusParts.length) {
+        const from = statusParts[i + 1];
+        const to = statusParts[i + 2];
+        entries.push({ name: to, paths: code.startsWith("R") ? [from, to] : [to] });
         i += 1;
       } else {
-        files.push(statusParts[i + 1]);
+        entries.push({ name: statusParts[i + 1], paths: [statusParts[i + 1]] });
+      }
+    }
+    let files: string[];
+    let stayed = 0;
+    let allowedPaths: Set<string> | null = null;
+    if (onlyFiles === undefined) {
+      files = entries.map((entry) => entry.name);
+    } else {
+      const picked = new Set(onlyFiles);
+      const chosen = entries.filter((entry) => picked.has(entry.name) || entry.paths.some((p) => picked.has(p)));
+      const leftOut = entries.filter((entry) => !chosen.includes(entry));
+      files = chosen.map((entry) => entry.name);
+      stayed = leftOut.length;
+      if (stayed > 0) {
+        if (chosen.length === 0) return { files: [], conflicts: [], kept: [], stayed };
+        const leftNames = new Set(leftOut.map((entry) => entry.name));
+        allowedPaths = new Set<string>();
+        for (const entry of chosen) {
+          allowedPaths.add(entry.name);
+          for (const p of entry.paths) {
+            if (!leftNames.has(p)) allowedPaths.add(p);
+          }
+        }
       }
     }
     const theirsCommit = (await step(["commit-tree", "--no-gpg-sign", "-p", copy.base, "-m", copy.branch, theirs])).trim();
     // If the copy's commits are already merged on the workspace's branch or its upstream (a PR
     // merged on GitHub), fast-forward instead of pasting the same edits back as uncommitted files.
-    const pulled = await tryPullMerged(copy, theirs, theirsCommit);
+    // Partial Apply never fast-forwards because that would pull unticked files in too.
+    const pulled = stayed > 0 ? null : await tryPullMerged(copy, theirs, theirsCommit);
     if (pulled) return { files, conflicts: [], kept: [], pulled };
     // The workspace's side: git's index copied, then brought up to what is on disk now.
     const oursIndex = path.join(scratch, "ours");
@@ -593,7 +622,7 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
     }
     await step(["add", "-u"], oursIndex);
     // Untracked files where the copy has changes are part of it too, ignored ones included.
-    const untracked = touched.filter((name) => {
+    const untracked = (allowedPaths ? touched.filter((name) => allowedPaths.has(name)) : touched).filter((name) => {
       const at = placeIn(repo, name);
       const stat = at ? lstat(at) : null;
       return Boolean(stat && (stat.isFile() || stat.isSymbolicLink()));
@@ -619,10 +648,16 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
     }
     const changes = await treeChanges(repo, ours, result);
     const labels = { ours: oursCommit, theirs: theirsCommit, base: copy.base, branch: copy.branch };
-    const failed = new Set(await writeChanges(repo, changes, stages, labels));
-    const marked = new Set(changes.filter((change) => withMarkers(change, stages) && !failed.has(change.path)).map((change) => change.path));
-    const conflicts = unique([...stages.keys(), ...failed].map((name) => plainName(name, labels)));
-    return { files, conflicts, kept: conflicts.filter((name) => !marked.has(name)) };
+    const isAllowed = (name: string) => !allowedPaths || allowedPaths.has(name) || allowedPaths.has(plainName(name, labels));
+    const pickedStages = new Map<string, { ours?: string; theirs?: string }>();
+    for (const [name, sides] of stages) {
+      if (isAllowed(name)) pickedStages.set(name, sides);
+    }
+    const pickedChanges = changes.filter((change) => isAllowed(change.path));
+    const failed = new Set(await writeChanges(repo, pickedChanges, pickedStages, labels));
+    const marked = new Set(pickedChanges.filter((change) => withMarkers(change, pickedStages) && !failed.has(change.path)).map((change) => change.path));
+    const conflicts = unique([...pickedStages.keys(), ...failed].map((name) => plainName(name, labels)));
+    return { files, conflicts, kept: conflicts.filter((name) => !marked.has(name)), ...(stayed > 0 ? { stayed } : {}) };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }

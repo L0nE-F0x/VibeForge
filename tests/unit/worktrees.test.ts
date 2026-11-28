@@ -591,5 +591,47 @@ describe("applying a copy that was already merged", () => {
     expect(offRes).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
     expect(read(offline.repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
   });
+
+  it("applies only ticked files, keeps unticked ones untouched in workspace, and skips fast-forward when partial", async () => {
+    const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES, "b.txt": LINES, "gone.txt": "bye\n", "old.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    write(copy.path, "b.txt", LINES.replace("two", "TWO"));
+    write(copy.path, "new.txt", "fresh\n");
+    fs.rmSync(path.join(copy.path, "gone.txt"));
+    git(copy.path, "mv", "old.txt", "moved.txt");
+    // Workspace has a conflicting edit on b.txt, which isn't ticked.
+    write(repo, "b.txt", LINES.replace("two", "MINE"));
+
+    const patch = await copyPatch(copy, owner);
+    const partial = await applyToWorkspace(copy, patch, { files: ["a.txt", "moved.txt"] });
+    expect(partial).toEqual({ files: ["a.txt", "moved.txt"], conflicts: [], kept: [], stayed: 3 });
+    expect(read(repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
+    expect(read(repo, "moved.txt")).toBe(LINES);
+    expect(fs.existsSync(path.join(repo, "old.txt"))).toBe(false);
+    // Unticked files weren't touched or conflicted.
+    expect(read(repo, "b.txt")).toBe(LINES.replace("two", "MINE"));
+    expect(fs.existsSync(path.join(repo, "new.txt"))).toBe(false);
+    expect(read(repo, "gone.txt")).toBe("bye\n");
+
+    // Empty file selection leaves everything in the copy untouched.
+    expect(await applyToWorkspace(copy, patch, { files: [] })).toEqual({ files: [], conflicts: [], kept: [], stayed: 5 });
+
+    // Partial Apply never fast-forwards even when the branch's commits were merged upstream.
+    const merged = await remoteRepoWithCopy({ "a.txt": LINES, "b.txt": LINES }, "task-partial-ff");
+    write(merged.copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    write(merged.copy.path, "b.txt", LINES.replace("two", "TWO"));
+    git(merged.copy.path, "commit", "-qam", "agent");
+    git(merged.copy.path, "push", "-q", "origin", merged.copy.branch);
+    git(merged.github, "fetch", "-q", "origin", merged.copy.branch);
+    git(merged.github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(merged.github, "commit", "-qm", "squash");
+    git(merged.github, "push", "-q", "origin", "main");
+
+    const mergedPartial = await applyToWorkspace(merged.copy, await copyPatch(merged.copy, merged.owner), { files: ["a.txt"] });
+    expect(mergedPartial).toEqual({ files: ["a.txt"], conflicts: [], kept: [], stayed: 1 });
+    expect(mergedPartial.pulled).toBeUndefined();
+    expect(read(merged.repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
+    expect(read(merged.repo, "b.txt")).toBe(LINES);
+  });
 });
 

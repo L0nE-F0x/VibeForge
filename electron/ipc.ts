@@ -292,7 +292,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "tasks.handOff": (runId, agentId) => s().handOff(runId, agentId),
     "tasks.stop": (id) => s().stopTask(id),
     "tasks.setStatus": (id, status) => s().setTaskStatus(id, status),
-    "tasks.applyCopy": (id) => s().applyTaskCopy(id),
+    "tasks.copyDiff": (id) => s().taskCopyDiff(String(id ?? "")),
+    "tasks.applyCopy": (id, files) => s().applyTaskCopy(String(id ?? ""), Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : undefined),
     "tasks.discardCopy": (id) => s().discardTaskCopy(id),
 
     "chats.list": (filter) => s().listChats(filter ?? {}),
@@ -359,7 +360,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "orchestrator.editStep": (turnId, stepId, patch) => s().orchestratorEditStep(String(turnId ?? ""), String(stepId ?? ""), patch && typeof patch === "object" ? patch : {}),
     "orchestrator.removeStep": (turnId, stepId) => s().orchestratorRemoveStep(String(turnId ?? ""), String(stepId ?? "")),
     "orchestrator.copyDiff": (copyId) => s().orchestratorCopyDiff(String(copyId ?? "")),
-    "orchestrator.applyCopy": (copyId) => s().orchestratorApplyCopy(String(copyId ?? "")),
+    "orchestrator.applyCopy": (copyId, files) => s().orchestratorApplyCopy(String(copyId ?? ""), Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : undefined),
     "orchestrator.discardCopy": (copyId) => s().orchestratorDiscardCopy(String(copyId ?? "")),
 
     "sync.view": () => sync.view(),
@@ -409,7 +410,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       ctx.service?.onHumanInput(ptyId, "\r");
       return supervisor.send(ptyId, text);
     },
-    "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty, toPty, what, selection }),
+    "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty: typeof fromPty === "string" ? fromPty : null, toPty, what, selection }),
     "talk.review": (authorPty, reviewerPty) => s().startReview(authorPty, reviewerPty),
     "talk.stop": (ptyId) => s().stopTalk(ptyId),
     "talk.startTasks": (ptyId, taskIds) => s().startHeldTasks(ptyId, taskIds),

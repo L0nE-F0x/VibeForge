@@ -184,11 +184,20 @@ export class MessageDesk {
     });
   }
 
-  /** Send to…: a draft from one pane into another, labelled, for a person to read and send. */
-  async sendDraft(input: { fromPty: string; toPty: string; what: "reply" | "selection" | "changes"; selection?: string }): Promise<{ sent: boolean }> {
-    const from = this.list().find((item) => item.ptyId === input.fromPty);
+  /** Send to…: a draft from one pane into another, or review notes from a diff, for a person to read and send. */
+  async sendDraft(input: { fromPty: string | null; toPty: string; what: "reply" | "selection" | "changes" | "notes"; selection?: string }): Promise<{ sent: boolean }> {
     const to = this.core.live.get(input.toPty);
-    if (!from || !to || !isCodingCli(to)) throw new Error("That CLI isn't running any more.");
+    if (!to || !isCodingCli(to)) throw new Error("That CLI isn't running any more.");
+    if (input.what === "notes") {
+      const text = cleanText(input.selection ?? "");
+      if (!text) return { sent: false };
+      const saved = this.files.saveIfLong("messages", text);
+      const body = saved ? `Review notes saved at ${saved}. Read them first.` : text;
+      await this.core.options.host.send(input.toPty, body, false);
+      return { sent: true };
+    }
+    const from = input.fromPty ? this.list().find((item) => item.ptyId === input.fromPty) : null;
+    if (!from) throw new Error("That CLI isn't running any more.");
     let text = "";
     if (input.what === "selection") text = cleanText(input.selection ?? "");
     else if (input.what === "reply") text = await this.lastAnswer(from);

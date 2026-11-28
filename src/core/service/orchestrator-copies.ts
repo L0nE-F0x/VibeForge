@@ -162,15 +162,15 @@ export class MaestroCopies {
    * first, as its folder is about to go. A clean apply (or nothing to apply) removes the copy, its
    * branch and its workspace; with conflicts the copy stays until they're sorted out.
    */
-  apply(id: string): Promise<ApplyResult> {
+  apply(id: string, files?: readonly string[]): Promise<ApplyResult> {
     return this.serial(async () => {
       const copy = this.find(id);
       if (!this.core.workspaceById(copy.workspaceId)) throw new Error("That workspace is gone.");
       if (!ownedCopyPath(this.owner(copy.id), copy.path)?.real) throw new Error("This copy is not in VibeForge's worktrees folder, so it was left alone.");
       if (!(await this.trusted(copy))) throw new Error("This copy names another repository, so it was left alone.");
       await this.endIn(copy);
-      const result = await applyToWorkspace(copy, await copyPatch(copy, this.owner(copy.id)));
-      if (result.conflicts.length) return result;
+      const result = await applyToWorkspace(copy, await copyPatch(copy, this.owner(copy.id)), files ? { files } : undefined);
+      if (result.conflicts.length || result.stayed) return result;
       // Files git ignores that only live in the copy keep it, with its workspace, until it is discarded.
       const left = await leftInCopy(copy);
       if (left.length) {

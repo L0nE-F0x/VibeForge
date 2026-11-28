@@ -543,8 +543,10 @@ export interface DeskMethods {
   "tasks.continue": (id: string, size?: TermSize) => Launched;
   "tasks.stop": (id: string) => TaskView;
   "tasks.setStatus": (id: string, status: TaskStatus) => TaskView;
-  /** Bring an isolated task's changes into its workspace as uncommitted edits. */
-  "tasks.applyCopy": (id: string) => ApplyResult;
+  /** Everything an isolated task's copy changed since it started, as a patch. */
+  "tasks.copyDiff": (id: string) => string;
+  /** Bring an isolated task's changes (or only the ticked files) into its workspace as uncommitted edits. */
+  "tasks.applyCopy": (id: string, files?: string[]) => ApplyResult;
   /** Throw an isolated task's copy away. */
   "tasks.discardCopy": (id: string) => Deleted;
 
@@ -626,7 +628,7 @@ export interface DeskMethods {
   "orchestrator.removeStep": (turnId: string, stepId: string) => void;
   /** A step's copy: its changes, Apply into the workspace it came from, or Discard (undone with undo.delete). */
   "orchestrator.copyDiff": (copyId: string) => string;
-  "orchestrator.applyCopy": (copyId: string) => ApplyResult;
+  "orchestrator.applyCopy": (copyId: string, files?: string[]) => ApplyResult;
   "orchestrator.discardCopy": (copyId: string) => Deleted;
 
   /** Sync between machines: this machine, the paired ones, what is shared, offered and waiting for a choice. */
@@ -681,8 +683,8 @@ export interface DeskMethods {
   "pty.write": (ptyId: string, data: string) => void;
   "pty.send": (ptyId: string, text: string) => void;
 
-  /** Send to…: a pane's last answer, selection or changes, left as a draft in another pane. False when there was nothing to send. */
-  "talk.sendDraft": (fromPty: string, toPty: string, what: "reply" | "selection" | "changes", selection?: string) => { sent: boolean };
+  /** Send to…: a pane's last answer, selection, changes, or review notes, left as a draft in another pane. False when there was nothing to send. */
+  "talk.sendDraft": (fromPty: string | null, toPty: string, what: "reply" | "selection" | "changes" | "notes", selection?: string) => { sent: boolean };
   /**
    * Review with…: once the author's turn ends, the reviewer reads its changes and the review goes
    * back to it. `changes` is false when the author hasn't changed anything yet: it waits for its next turn.

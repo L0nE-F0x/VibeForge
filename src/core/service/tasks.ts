@@ -348,19 +348,31 @@ export class TaskDesk {
     return { cwd, setupCommand };
   }
 
+  /** Everything the task's separate copy changed since it started, as a unified patch. */
+  async copyDiff(id: string): Promise<string> {
+    const task = this.core.store.getTask(id);
+    if (!task) throw new Error("That task no longer exists.");
+    if (!task.copy) throw new Error("This task has no separate copy.");
+    if (!ownedCopyPath(this.owner(id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+    if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
+    return copyPatch(task.copy, this.owner(id));
+  }
+
   /**
    * Bring a task copy's changes into the workspace as uncommitted edits. A clean apply removes the
-   * copy and marks the task done, and so does a copy with nothing to apply; with conflicts the copy
-   * stays until they're sorted out.
+   * copy and marks the task done, and so does a copy with nothing to apply; with conflicts or when
+   * only some files are ticked the copy stays until they're sorted out or applied.
    */
-  async applyCopy(id: string): Promise<ApplyResult> {
+  async applyCopy(id: string, files?: readonly string[]): Promise<ApplyResult> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (!task.copy) throw new Error("This task has no separate copy.");
     if (this.taskLive(task)) throw new Error("Stop the task before applying its changes.");
     if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
     const patch = await copyPatch(task.copy, this.owner(id));
-    const result = await applyToWorkspace(task.copy, patch);
+    const result = await applyToWorkspace(task.copy, patch, files ? { files } : undefined);
+    // Partial Apply keeps the copy intact so unticked files aren't lost.
+    if (result.stayed) return result;
     // Files git ignores that only live in the copy keep it, as conflicts do, until it is discarded.
     const left = result.conflicts.length ? [] : await leftInCopy(task.copy);
     if (left.length) result.left = { folder: task.copy.path, files: left };

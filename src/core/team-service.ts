@@ -432,8 +432,8 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.copyDiff(copyId);
   }
 
-  orchestratorApplyCopy(copyId: string): Promise<ApplyResult> {
-    return this.orchestrator.applyCopy(copyId);
+  orchestratorApplyCopy(copyId: string, files?: readonly string[]): Promise<ApplyResult> {
+    return this.orchestrator.applyCopy(copyId, files);
   }
 
   orchestratorDiscardCopy(copyId: string): Promise<Deleted> {
@@ -552,8 +552,8 @@ export class TeamService extends ServiceCore {
     return this.messages.applyHanded(input);
   }
 
-  /** Send to…: one pane's last answer, selection or changes, as a draft in another pane. */
-  sendDraft(input: { fromPty: string; toPty: string; what: "reply" | "selection" | "changes"; selection?: string }): Promise<{ sent: boolean }> {
+  /** Send to…: one pane's last answer, selection or changes, or review notes, as a draft in another pane. */
+  sendDraft(input: { fromPty: string | null; toPty: string; what: "reply" | "selection" | "changes" | "notes"; selection?: string }): Promise<{ sent: boolean }> {
     return this.messages.sendDraft(input);
   }
 
@@ -589,8 +589,12 @@ export class TeamService extends ServiceCore {
     return this.tasks.setTaskStatus(id, status);
   }
 
-  applyTaskCopy(id: string): Promise<ApplyResult> {
-    return this.tasks.applyCopy(id);
+  taskCopyDiff(id: string): Promise<string> {
+    return this.tasks.copyDiff(id);
+  }
+
+  applyTaskCopy(id: string, files?: readonly string[]): Promise<ApplyResult> {
+    return this.tasks.applyCopy(id, files);
   }
 
   discardTaskCopy(id: string): Promise<Deleted> {

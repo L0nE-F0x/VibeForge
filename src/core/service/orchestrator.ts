@@ -2056,8 +2056,8 @@ export class OrchestratorDesk {
   }
 
   /** Apply a step's copy into the workspace it came from (see MaestroCopies.apply). */
-  applyCopy(copyId: string): Promise<ApplyResult> {
-    return this.copies.apply(copyId);
+  applyCopy(copyId: string, files?: readonly string[]): Promise<ApplyResult> {
+    return this.copies.apply(copyId, files);
   }
 
   /** Throw a step's copy away, with Undo (see MaestroCopies.discard). */
