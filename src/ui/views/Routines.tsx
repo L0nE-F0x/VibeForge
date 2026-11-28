@@ -9,7 +9,7 @@ import { Button, Chip, Empty, Field, Input, Notice, PageSub, SecretNote, Segment
 import { Rich } from "../i18n/Rich.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { matchesQuery, nameOrder, timeOf, type ListSpec } from "../list-view.js";
-import { deleteEach, useAction, useDeleted, useDeletedMany, useNav, useToast, type Route } from "../state.js";
+import { deleteEach, useAction, useConfirm, useDeleted, useDeletedMany, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
@@ -41,6 +41,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
   const { push } = useToast();
   const deleted = useDeleted();
   const deletedMany = useDeletedMany();
+  const confirm = useConfirm();
   const routines = useRoutines();
   const home = useAppInfo().data?.home ?? "";
   const unreadableFiles = useUnreadableOf("routine").length;
@@ -63,6 +64,16 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
   const [stopWaiting] = useAction(async (routine: RoutineView) => call("routines.cancelWait", routine.id), t("routines.changeFailed"));
   const [toggle] = useAction(async (routine: RoutineView, enabled: boolean) => call("routines.setEnabled", routine.id, enabled), t("routines.changeFailed"));
   const [remove] = useAction(async (routine: RoutineView) => {
+    // Deleting is undone from the toast. A running one asks first: stopping its run can't be undone.
+    if (routine.stillRunning) {
+      const ok = await confirm({
+        title: t("common.deleteNamed", { name: routine.name }),
+        body: t("routines.deleteRunningBody"),
+        confirm: t("common.stopAndDelete"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
     deleted(t("routines.deleted", { name: routine.name }), await call("routines.delete", routine.id));
   }, t("routines.deleteFailed"));
   const [applyCopy] = useAction(async (routine: RoutineView) => {
@@ -117,9 +128,20 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
     for (const routine of picked) if (routine.enabled !== enabled) await call("routines.setEnabled", routine.id, enabled);
     selection.setSelecting(false);
   }, t("routines.changeFailed"));
-  // Deleting is undone from the toast, so nothing asks first.
   const [deletePicked, deleting] = useAction(async () => {
     if (!picked.length) return;
+    // Deleting is undone from the toast. A running one asks first: stopping its run can't be undone.
+    const running = picked.filter((routine) => routine.stillRunning).length;
+    if (running) {
+      const one = picked.length === 1;
+      const ok = await confirm({
+        title: one ? t("common.deleteNamed", { name: picked[0].name }) : t.count("routines.deleteManyTitle", picked.length),
+        body: one ? t("routines.deleteRunningBody") : t.count("list.deleteLiveBody", running),
+        confirm: t("common.stopAndDelete"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
     const { gone, deleted: undo, error } = await deleteEach(picked, (routine) => call("routines.delete", routine.id));
     if (gone.length === 1) deleted(t("routines.deleted", { name: gone[0].name }), undo[0]);
     else deletedMany(t.count("routines.deletedMany", gone.length), undo);
@@ -234,6 +256,13 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                   </Notice>
                 </div>
               )}
+              {routine.stillRunning && routine.skippedSlots && routine.skippedSlots.runId === routine.lastRun?.id && !selection.selecting && (
+                <div style={{ marginTop: 10 }}>
+                  <Notice tone="warn" icon={Hourglass}>
+                    {t.count("routines.skippedNote", routine.skippedSlots.count)}
+                  </Notice>
+                </div>
+              )}
               {routine.copy && !routine.copyOwned && !selection.selecting && (
                 <div style={{ marginTop: 10 }}>
                   <Notice tone="warn" icon={GitBranch}>
@@ -325,6 +354,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                       <span className="meta truncate grow">
                         <TimeAgo iso={run.endedAt ?? run.startedAt} />
                         {run.changes ? ` · ${changesFor(run.changes, t)}` : ""}
+                        {routine.skippedSlots?.runId === run.id ? ` · ${t.count("routines.skipped", routine.skippedSlots.count)}` : ""}
                       </span>
                     </button>
                   ))}
@@ -371,13 +401,14 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
     prompt: routine?.prompt ?? "",
     notify: routine?.notify ?? true,
     enabled: routine?.enabled ?? true,
-    timeoutMinutes: routine?.timeoutMinutes ?? 120,
+    // A new routine gets 2 hours; a saved one keeps its own, none included.
+    timeoutMinutes: routine ? routine.timeoutMinutes : (120 as number | null),
     isolated: routine?.isolated ?? false,
     shareCheckout: routine?.shareCheckout ?? false,
   });
   const { name, agentId, schedule, prompt, notify, enabled } = form;
   // Drafts kept before 2.0 / 3.16 have neither `shareCheckout` nor `timeoutMinutes` / `isolated`.
-  const timeoutMinutes = form.timeoutMinutes ?? 120;
+  const timeoutMinutes = form.timeoutMinutes === undefined ? 120 : form.timeoutMinutes;
   const isolated = form.isolated ?? false;
   const shareCheckout = form.shareCheckout ?? false;
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
@@ -386,11 +417,11 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
   const setPrompt = (next: string) => setForm((prev) => ({ ...prev, prompt: next }));
   const setNotify = (next: boolean) => setForm((prev) => ({ ...prev, notify: next }));
   const setEnabled = (next: boolean) => setForm((prev) => ({ ...prev, enabled: next }));
-  const setTimeoutMinutes = (next: number) => setForm((prev) => ({ ...prev, timeoutMinutes: next }));
+  const setTimeoutMinutes = (next: number | null) => setForm((prev) => ({ ...prev, timeoutMinutes: next }));
   const setIsolated = (next: boolean) => setForm((prev) => ({ ...prev, isolated: next }));
   const [preview, setPreview] = useState<SchedulePreview | null>(null);
   const agent = agents.find((item) => item.id === agentId);
-  const validTimeout = Number.isInteger(timeoutMinutes) && timeoutMinutes >= 5 && timeoutMinutes <= 7 * 24 * 60;
+  const validTimeout = timeoutMinutes === null || (Number.isInteger(timeoutMinutes) && timeoutMinutes >= 5 && timeoutMinutes <= 7 * 24 * 60);
 
   useEffect(() => {
     let cancelled = false;
@@ -471,7 +502,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
                 <span className="faint">{t("routines.minutesMin")}</span>
                 {[15, 30, 60, 240].map((minutes) => (
                   <Button key={minutes} size="sm" variant="ghost" pressed={schedule.minutes === minutes} onClick={() => setSchedule({ kind: "every", minutes })}>
-                    {minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
+                    {quickTime(t, minutes)}
                   </Button>
                 ))}
               </div>
@@ -504,16 +535,20 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
               max={10080}
               step={5}
               style={{ width: 120 }}
-              value={Number.isFinite(timeoutMinutes) ? timeoutMinutes : ""}
+              value={timeoutMinutes !== null && Number.isFinite(timeoutMinutes) ? timeoutMinutes : ""}
+              placeholder={timeoutMinutes === null ? t("routines.noLimit") : undefined}
               invalid={!validTimeout}
-              onChange={(event) => setTimeoutMinutes(Number(event.target.value))}
+              onChange={(event) => setTimeoutMinutes(event.target.value.trim() ? Number(event.target.value) : null)}
             />
             <span className="faint">{t("routines.minutesMin")}</span>
             {[30, 60, 120, 240].map((minutes) => (
               <Button key={minutes} size="sm" variant="ghost" pressed={timeoutMinutes === minutes} onClick={() => setTimeoutMinutes(minutes)}>
-                {minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
+                {quickTime(t, minutes)}
               </Button>
             ))}
+            <Button size="sm" variant="ghost" pressed={timeoutMinutes === null} onClick={() => setTimeoutMinutes(null)}>
+              {t("routines.noLimit")}
+            </Button>
           </div>
         </Field>
         <Field hint={t("routines.isolatedHint")}>
@@ -542,4 +577,9 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
       </div>
     </Sheet>
   );
+}
+
+/** A quick time button's label: "30m", "4h", in the window's language. */
+function quickTime(t: ReturnType<typeof useT>, minutes: number): string {
+  return minutes < 60 || minutes % 60 ? t("routines.quickMinutes", { count: minutes }) : t("routines.quickHours", { count: minutes / 60 });
 }

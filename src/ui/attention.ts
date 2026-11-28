@@ -171,8 +171,14 @@ export function trackLive(live: readonly LiveSession[], looking: Looking | null,
     // Seen by you: its next quiet spell is news again.
     if (watched(was.mark)) was.knockedAt = -Infinity;
     if (session.origin === "routine") {
-      // Routine runs end automatically once their turn finishes; only flag when they stop on a question.
+      // A routine's run ends by itself once its turn finishes, so a quiet spell isn't news: it's
+      // flagged when it stops on a question, or when its first screen sat still from the start
+      // (a trust or sign-in screen VibeForge doesn't know).
       if (needsInput && !before?.needsInput) flag(was, "waiting");
+      else if (cli && !working && !was.worked && !was.firstChecked && now - was.cliSince >= FIRST_SCREEN_MS) {
+        was.firstChecked = true;
+        flag(was, "waiting");
+      }
       if (!needsInput && before?.needsInput && next.get(session.ptyId)?.attention === "waiting") next.delete(session.ptyId);
     } else {
       if (before?.cli && cli && before.working && !working) flag(was, "waiting");

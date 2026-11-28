@@ -106,6 +106,14 @@ describe("attention", () => {
     expect(track([routine({ working: false, needsInput: false })], null)).toEqual([]);
   });
 
+  it("marks a routine sitting still on a first screen it doesn't know, once", () => {
+    const first = [session("r-2", "", { kind: "run", origin: "routine", routineId: "nightly", runId: "run-2", title: "Nightly" })];
+    expect(track(first, null)).toEqual([]);
+    now += FIRST_SCREEN_MS;
+    expect(names(track(first, null))).toEqual(["r-2:waiting"]);
+    expect(track(first, null)).toEqual([]);
+  });
+
   it("opens each waiter where it waits", () => {
     const base = { ptyId: "p", attention: "waiting" as const, label: "x", agentId: null, chatId: null, taskId: null, routineId: null, runId: "r1", since: 0 };
     expect(routeForMark({ ...base, origin: "task", taskId: "fix", workspaceId: "ws" }, true)).toEqual({ view: "tasks", taskId: "fix" });
