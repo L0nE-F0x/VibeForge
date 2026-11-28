@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Bot,
   BookOpen,
   Brain,
@@ -17,6 +18,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
+import { flaggedMemoryLines, removeMemoryLineAt } from "../../shared/memory.js";
 import { listText, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSettings, useSkills } from "../api.js";
 import { autosaveDue, oneLine } from "../autosave.js";
@@ -512,6 +514,8 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
   const engine = engines.find((item) => item.id === agent.engine);
   const chats = useChats(agent.id).data ?? [];
   const runs = useQuery(`runs:agent:${agent.id}`, ["runs"], () => call("runs.list", { agentId: agent.id, limit: AGENT_RUNS }));
+  const memoryPeek = useQuery(`memory-peek:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id).catch(() => ""));
+  const flaggedCount = useMemo(() => flaggedMemoryLines(memoryPeek.data ?? "").length, [memoryPeek.data]);
   const setTab = (next: AgentTab) => go({ view: "agents", agentId: agent.id, tab: next, chatId: next === "chats" ? (chatId ?? lastChat(agent.id)) : undefined });
 
   return (
@@ -540,7 +544,12 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
         tabs={[
           { value: "chats", label: t("agents.chats"), icon: MessagesSquare, badge: chats.some((chat) => chat.live) ? <span className="dot running" /> : undefined },
           { value: "brief", label: t("agents.brief"), icon: BookOpen },
-          { value: "memory", label: t("agents.tab.memory"), icon: Brain },
+          {
+            value: "memory",
+            label: t("agents.tab.memory"),
+            icon: Brain,
+            badge: flaggedCount ? <Chip tone="warn" title={t.count("agents.memoryFlaggedShort", flaggedCount)}>{flaggedCount}</Chip> : undefined,
+          },
           { value: "skills", label: t("skills.title"), icon: Sparkles, badge: agent.skills.length ? <Chip>{agent.skills.length}</Chip> : undefined },
           { value: "folders", label: t("agents.folders"), icon: FolderOpen },
           { value: "runs", label: t("runs.title"), icon: History },
@@ -710,6 +719,37 @@ function BriefTab({ agent }: { agent: Agent }) {
   );
 }
 
+/** Warning banner listing lines in `memory.md` that look like commands, URLs, or injected instructions. */
+export function FlaggedMemoryNotice({ text, onRemove }: { text: string; onRemove: (index: number) => void }) {
+  const t = useT();
+  const flagged = useMemo(() => flaggedMemoryLines(text), [text]);
+  if (!flagged.length) return null;
+  return (
+    <Notice tone="warn" icon={AlertTriangle}>
+      <div className="vstack" style={{ gap: 8 }}>
+        <strong>{t.count("agents.memoryFlagged", flagged.length)}</strong>
+        <div className="vstack" style={{ gap: 6 }}>
+          {flagged.map((item) => (
+            <div key={`${item.index}:${item.line}`} className="hstack" style={{ gap: 8, alignItems: "flex-start" }}>
+              <span className="hstack wrap" style={{ gap: 4, flex: "none", paddingTop: 2 }}>
+                {item.flags.map((flag) => (
+                  <Chip key={flag} tone="warn">
+                    {t(`agents.memoryFlag.${flag}`)}
+                  </Chip>
+                ))}
+              </span>
+              <span className="mono selectable grow" style={{ overflowWrap: "anywhere" }}>
+                {item.line}
+              </span>
+              <Button size="sm" variant="ghost" icon={X} title={t("agents.removeLine")} onClick={() => onRemove(item.index)} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </Notice>
+  );
+}
+
 function MemoryTab({ agent }: { agent: Agent }) {
   const t = useT();
   const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id), { what: "load.memory" });
@@ -725,6 +765,7 @@ function MemoryTab({ agent }: { agent: Agent }) {
   return (
     <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.memoryStored")}`}>
       <Notice icon={Brain}>{t("agents.memoryNote")}</Notice>
+      <FlaggedMemoryNotice text={text} onRemove={(index) => setText((prev) => (prev === null ? prev : removeMemoryLineAt(prev, index)))} />
       <LibraryConflicts kind="agent" id={agent.id} />
       <TextArea code value={text} style={{ minHeight: 320 }} onChange={(event) => setText(event.target.value)} />
       <SecretNote />

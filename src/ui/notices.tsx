@@ -3,7 +3,7 @@ import type { DeskNotice } from "../shared/api.js";
 import { call, on } from "./api.js";
 import { useCopyDiagnostics } from "./components/Help.js";
 import { t } from "./i18n/index.js";
-import { useToast } from "./state.js";
+import { useNav, useToast } from "./state.js";
 import { placeInCode } from "./views/code/useWorkspacePanes.js";
 import { continueInPanes, cutOffNote, inPane, settleCutOff } from "./cut-off.js";
 import type { CutOffRun } from "../shared/api.js";
@@ -52,10 +52,13 @@ async function continueCutOff(asked: readonly CutOffRun[]): Promise<{ continued:
 
 export function MainNotices() {
   const { push, dismiss, fail } = useToast();
+  const { go } = useNav();
   const copyDiagnostics = useCopyDiagnostics();
   // The newest, for the listeners set up once below.
   const copy = useRef(copyDiagnostics);
   copy.current = copyDiagnostics;
+  const goRef = useRef(go);
+  goRef.current = go;
 
   useEffect(() => {
     // The "isn't answering" toast on screen, cleared when the host answers again.
@@ -106,6 +109,31 @@ export function MainNotices() {
             : undefined,
           // It says what was cut off and offers Continue all: it stays until it is closed.
           { stay: true },
+        );
+      } else if (notice.id === "agent-remembered") {
+        const note = notice.note.length > 140 ? `${notice.note.slice(0, 139).trimEnd()}…` : notice.note;
+        const id = push(
+          "info",
+          t("agents.rememberedToast", { name: notice.agentName, note }),
+          notice.flagged ? t("agents.rememberedFlaggedToast") : undefined,
+          {
+            label: t("common.undo"),
+            run: () => void call("undo.delete", notice.undo).catch((error: unknown) => fail(error, t("common.undoFailed"))),
+          },
+          notice.flagged
+            ? {
+                stay: true,
+                more: [
+                  {
+                    label: t("agents.openMemory"),
+                    run: () => {
+                      dismiss(id);
+                      goRef.current({ view: "agents", agentId: notice.agentId, tab: "memory" });
+                    },
+                  },
+                ],
+              }
+            : undefined,
         );
       }
     };
