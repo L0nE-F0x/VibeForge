@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { HISTORY_REVS, runGit, type GitResult } from "./git.js";
-import { diffHeaderTarget } from "./worktrees.js";
+import { diffHeaderTarget } from "../shared/review.js";
 
 /**
  * Every git call here is read-only. `--no-optional-locks` keeps status from touching the index

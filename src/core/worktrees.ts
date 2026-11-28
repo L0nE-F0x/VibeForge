@@ -5,6 +5,7 @@ import { MADE_COPY_FOLDERS, seedCopy } from "./copy-setup.js";
 import { runGit, runGitBytes } from "./git.js";
 import { isPathInside } from "./places.js";
 import { isSafeId } from "./slug.js";
+export { diffHeaderTarget, patchFiles } from "../shared/review.js";
 import type { WorkspaceCopySetup } from "./types.js";
 
 /**
@@ -469,71 +470,6 @@ function stagingFailure(run: GitRun): Error {
     return new Error(`Could not read the copy's changes: ${folder} in the copy is a git repository of its own with nothing committed yet. Commit in it, or remove its .git folder, and try again.`);
   }
   return failure("Could not read the copy's changes", run);
-}
-
-function unquoteGitPath(raw: string): string {
-  if (!raw.startsWith('"') || !raw.endsWith('"')) return raw;
-  const inner = raw.slice(1, -1);
-  const bytes: number[] = [];
-  const escaped: Record<string, string> = { t: "\t", n: "\n", r: "\r", '"': '"', "\\": "\\" };
-  for (let i = 0; i < inner.length; i += 1) {
-    if (inner[i] !== "\\" || i + 1 >= inner.length) {
-      bytes.push(...Buffer.from(inner[i], "utf8"));
-      continue;
-    }
-    const oct = /^[0-7]{3}/.exec(inner.slice(i + 1, i + 4));
-    if (oct) {
-      bytes.push(Number.parseInt(oct[0], 8));
-      i += 3;
-      continue;
-    }
-    i += 1;
-    bytes.push(...Buffer.from(escaped[inner[i]] ?? inner[i], "utf8"));
-  }
-  return Buffer.from(bytes).toString("utf8");
-}
-
-export function diffHeaderTarget(line: string): string | null {
-  if (!line.startsWith("diff --git ")) return null;
-  const rest = line.slice("diff --git ".length);
-  if (rest.startsWith('"')) {
-    const tokens: string[] = [];
-    for (let i = 0; i < rest.length && tokens.length < 2; ) {
-      if (rest[i] === " ") {
-        i += 1;
-        continue;
-      }
-      if (rest[i] === '"') {
-        let j = i + 1;
-        while (j < rest.length && rest[j] !== '"') j += rest[j] === "\\" ? 2 : 1;
-        tokens.push(unquoteGitPath(rest.slice(i, j + 1)));
-        i = j + 1;
-      } else {
-        const end = rest.indexOf(" ", i);
-        tokens.push(rest.slice(i, end < 0 ? rest.length : end));
-        i = end < 0 ? rest.length : end;
-      }
-    }
-    return tokens.length === 2 && tokens[1].startsWith("b/") ? tokens[1].slice(2) : null;
-  }
-  let pos = rest.indexOf(" b/");
-  let fallback: string | null = null;
-  while (pos >= 0 && rest.startsWith("a/")) {
-    if (rest.slice(2, pos) === rest.slice(pos + 3)) return rest.slice(pos + 3);
-    fallback = rest.slice(pos + 3);
-    pos = rest.indexOf(" b/", pos + 1);
-  }
-  return fallback;
-}
-
-/** The files a patch touches, from its `diff --git` headers (handling `" b/"` and C-quoted names). */
-export function patchFiles(patch: string): string[] {
-  const files = new Set<string>();
-  for (const line of patch.split("\n")) {
-    const file = diffHeaderTarget(line);
-    if (file) files.add(file);
-  }
-  return [...files];
 }
 
 /**

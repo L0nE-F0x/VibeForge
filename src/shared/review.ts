@@ -124,21 +124,16 @@ function readHeaderToken(rest: string, start: number): { value: string; next: nu
   return { value: rest.slice(i, space), next: space };
 }
 
-/** Parse a `diff --git a/... b/...` header, handling spaces, `" b/"` inside names, and C-quoted paths. */
-export function parseDiffGitHeader(line: string): { oldPath: string; path: string } | null {
+function parseHeader(line: string, strict: boolean): { oldPath: string; path: string } | null {
   if (!line.startsWith("diff --git ")) return null;
   const rest = line.slice("diff --git ".length);
   if (rest.includes('"')) {
     const first = readHeaderToken(rest, 0);
-    if (first) {
-      const second = readHeaderToken(rest, first.next);
-      if (second) {
-        return {
-          oldPath: stripGitPrefix(first.value, "a/"),
-          path: stripGitPrefix(second.value, "b/"),
-        };
-      }
+    const second = first ? readHeaderToken(rest, first.next) : null;
+    if (first && second && (!strict || second.value.startsWith("b/"))) {
+      return { oldPath: stripGitPrefix(first.value, "a/"), path: stripGitPrefix(second.value, "b/") };
     }
+    if (strict && rest.startsWith('"')) return null;
   }
   let pos = rest.indexOf(" b/");
   let fallback: { oldPath: string; path: string } | null = null;
@@ -149,8 +144,28 @@ export function parseDiffGitHeader(line: string): { oldPath: string; path: strin
     fallback = { oldPath, path: nextPath };
     pos = rest.indexOf(" b/", pos + 1);
   }
-  if (fallback) return fallback;
+  if (fallback || strict) return fallback;
   return { oldPath: rest, path: rest };
+}
+
+/** Parse a `diff --git a/... b/...` header, handling spaces, `" b/"` inside names, and C-quoted paths. */
+export function parseDiffGitHeader(line: string): { oldPath: string; path: string } | null {
+  return parseHeader(line, false);
+}
+
+/** The file a `diff --git` header names on its `b/` side, or null when the line isn't one git wrote. */
+export function diffHeaderTarget(line: string): string | null {
+  return parseHeader(line, true)?.path ?? null;
+}
+
+/** The files a patch touches, from its `diff --git` headers. */
+export function patchFiles(patch: string): string[] {
+  const files = new Set<string>();
+  for (const line of patch.split("\n")) {
+    const file = diffHeaderTarget(line);
+    if (file) files.add(file);
+  }
+  return [...files];
 }
 
 /** True for lockfiles and generated minified/sourcemap files that start folded in review. */
