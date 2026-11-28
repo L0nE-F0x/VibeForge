@@ -94,5 +94,23 @@ describe("notices from the main process", () => {
     expect(sent).toHaveLength(1);
     expect(ctx.takeNotices()).toEqual([{ id: "host-answering" }]);
   });
-});
 
+  it("keeps a burst of memory proposals from pushing out host-stopped or errors notices", () => {
+    const ctx = context();
+    const proposed = (agentId: string, note: string) => ({ id: "memory-proposed" as const, agentId, agentName: agentId, note, flagged: false, waiting: 1 });
+    ctx.notice({ id: "host-stopped", terminals: 2, runIds: ["r1"] });
+    ctx.notice({ id: "errors", count: 3 });
+    for (let i = 0; i < 40; i += 1) ctx.notice(proposed(`agent-${i % 8}`, `line ${i}`));
+    // One per agent, the newest; only the newest few agents.
+    ctx.notice(proposed("agent-7", "newest for 7"));
+    const held = ctx.takeNotices();
+    expect(held.slice(0, 2)).toEqual([
+      { id: "host-stopped", terminals: 2, runIds: ["r1"] },
+      { id: "errors", count: 3 },
+    ]);
+    const kept = held.slice(2);
+    expect(kept).toHaveLength(5);
+    expect(kept.map((item) => (item.id === "memory-proposed" ? item.agentId : item.id))).toEqual(["agent-3", "agent-4", "agent-5", "agent-6", "agent-7"]);
+    expect(kept.at(-1)).toMatchObject({ note: "newest for 7" });
+  });
+});
