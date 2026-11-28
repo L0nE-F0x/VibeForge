@@ -9,7 +9,9 @@ import {
   FileText,
   FolderOpen,
   Forward,
+  GitBranch,
   GitCompare,
+  GitMerge,
   Info,
   ListRestart,
   MoreHorizontal,
@@ -18,22 +20,26 @@ import {
   ScrollText,
   Square,
   TerminalSquare,
+  Trash2,
   Undo2,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { RunRestoreAvailability, RunRestorePreview, RunView, Topic } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
+import { splitPatch } from "../../shared/review.js";
 import { duration, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
-import { routeForRun, useAction, useNav, useToast } from "../state.js";
+import { call, useAgents, useAppInfo, useEngines, useNow, useQuery, useTasks, useWorkspaces } from "../api.js";
+import { applyToast } from "../apply-note.js";
+import { routeForRun, useAction, useDeleted, useNav, useToast } from "../state.js";
 import { setPtyInView } from "../attention.js";
 import { usePlace } from "../remember.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { useNarrowStage } from "./SidePanel.js";
+import { DiffReview } from "./DiffReview.js";
 import { Button, Chip, Empty, MenuButton, Modal, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { Rich } from "../i18n/Rich.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
-import { diffFiles } from "../diff-files.js";
 import { changesFor } from "../changes-text.js";
 import { shortcutKeys } from "../shortcuts.js";
 
@@ -49,44 +55,10 @@ type Tab = "session" | "changes" | "prompt" | "transcript" | "details";
 const TABS: readonly Tab[] = ["session", "changes", "prompt", "transcript", "details"];
 const isTab = (value: unknown): value is Tab => TABS.includes(value as Tab);
 
-/** A diff, one row per line up to 20,000. Memoised: a big one is slow to build and rarely changes. */
+/** Compact syntax-coloured diff view (used for conflict diffs in dialogs). */
 export const DiffView = memo(function DiffView({ text }: { text: string }) {
-  const t = useT();
-  const all = useMemo(() => text.split("\n"), [text]);
-  const rows = useMemo(
-    () =>
-      (all.length > DIFF_CAP ? all.slice(0, DIFF_CAP) : all).map((line, index) => {
-        const kind = line.startsWith("diff --git")
-          ? "file"
-          : line.startsWith("#")
-            ? "meta"
-            : line.startsWith("@@")
-              ? "hunk"
-              : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode")
-                ? "meta"
-                : line.startsWith("+")
-                  ? "add"
-                  : line.startsWith("-")
-                    ? "del"
-                    : "";
-        return (
-          <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
-            {line || " "}
-          </div>
-        );
-      }),
-    [all],
-  );
-  if (!text.trim()) return <Notice>{t("run.noDiff")}</Notice>;
-  return (
-    <>
-      <div className="diff">{rows}</div>
-      {all.length > DIFF_CAP && <Notice>{t("run.diffCapped")}</Notice>}
-    </>
-  );
+  return <DiffReview text={text} compact />;
 });
-
-const DIFF_CAP = 20000;
 
 /** How long a run took, or has taken so far. Only a running one ticks, and only this text re-renders. */
 function Elapsed({ start, end }: { start: string; end: string | null }) {
@@ -131,7 +103,14 @@ function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null
 function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: string; patchSaved: boolean }) {
   const t = useT();
   const { push } = useToast();
+  const deleted = useDeleted();
+  const home = useAppInfo().data?.home ?? "";
+  const tasks = useTasks().data ?? [];
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const task = run.taskId ? tasks.find((item) => item.id === run.taskId) : undefined;
+  const taskWorkspace = task ? workspaces.find((item) => item.id === task.workspaceId) : undefined;
   const [diff, setDiff] = useState<{ text: string; source: "saved" | "now" } | null>(null);
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
   const [load, loading] = useAction(async (source: "saved" | "now") => {
     setDiff({ text: await call("runs.diff", run.id, source), source });
   }, t("run.diffFailed"));
@@ -139,11 +118,37 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
   const saved = run.status !== "running" && patchSaved;
   // What a finished run changed is the point of reviewing it: its saved diff opens with the tab.
   useEffect(() => {
+    setExcluded(new Set());
     if (saved && !notRepo) void load("saved");
-  }, [saved, notRepo, load]);
-  const files = useMemo(() => (diff ? diffFiles(diff.text) : []), [diff]);
-  const diffBox = useRef<HTMLDivElement>(null);
-  const showFile = (line: number) => diffBox.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [run.id, saved, notRepo, load]);
+
+  const parsedPaths = useMemo(() => (diff ? splitPatch(diff.text).files.map((file) => file.path) : []), [diff]);
+  const pickedPaths = useMemo(() => parsedPaths.filter((item) => !excluded.has(item)), [parsedPaths, excluded]);
+  const pickedSet = useMemo(() => new Set(pickedPaths), [pickedPaths]);
+  const toggleFile = (filePath: string) =>
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(filePath)) next.delete(filePath);
+      else next.add(filePath);
+      return next;
+    });
+
+  const canApplyTaskCopy = Boolean(task && task.copy && task.copyOwned && !task.lastRun?.live && run.id === task.lastRun?.id && diff?.source !== "now");
+  const workspaceName = taskWorkspace?.name ?? task?.copy?.repo ?? "";
+  const [applyCopy, applying] = useAction(async () => {
+    if (!task?.copy) return;
+    const partial = parsedPaths.length > 0 && pickedPaths.length < parsedPaths.length ? pickedPaths : undefined;
+    const result = await call("tasks.applyCopy", task.id, partial);
+    const toast = applyToast(t, result, workspaceName, home);
+    push(toast.tone, toast.title, toast.body);
+    if (result.stayed) setExcluded(new Set());
+  }, t("tasks.applyFailed"));
+  const [discardCopy, discarding] = useAction(async () => {
+    if (!task) return;
+    const result = await call("tasks.discardCopy", task.id);
+    deleted(t("tasks.copyDiscarded", { title: task.title }), result);
+  }, t("tasks.discardFailed"));
+
   return (
     <div className="page-body vstack" style={{ gap: 14 }}>
       {run.status === "running" && <Notice icon={Info}>{t("run.diffLater")}</Notice>}
@@ -172,22 +177,48 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
             )}
             <span className="faint">{diffCaption(run, saved, diff?.source ?? null, t)}</span>
           </div>
-          {files.length > 0 && (
-            <div className="diff-files">
-              {files.map((file) => (
-                <button key={file.line} type="button" className="diff-file" onClick={() => showFile(file.line)}>
-                  <FileText size={13} className="faint" />
-                  <span className="mono truncate grow">{file.path}</span>
-                  {file.added > 0 && <span className="diff-count add">+{file.added}</span>}
-                  {file.removed > 0 && <span className="diff-count del">−{file.removed}</span>}
-                </button>
-              ))}
-            </div>
+          {canApplyTaskCopy && task?.copy && (
+            <Notice tone="accent" icon={GitBranch}>
+              <div className="hstack wrap">
+                <span className="grow">
+                  <Rich text={t("tasks.copyNote", { branch: task.copy.branch, workspace: workspaceName })} />
+                </span>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={GitMerge}
+                  busy={applying}
+                  disabled={parsedPaths.length > 0 && pickedPaths.length === 0}
+                  tip={t("tasks.applyTip")}
+                  onClick={() => void applyCopy()}
+                >
+                  {parsedPaths.length > 0 && pickedPaths.length < parsedPaths.length
+                    ? t("review.applyPicked", { count: pickedPaths.length, total: parsedPaths.length, workspace: workspaceName })
+                    : t("tasks.apply", { workspace: workspaceName })}
+                </Button>
+                <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} onClick={() => void discardCopy()}>
+                  {t("tasks.discardCopy")}
+                </Button>
+              </div>
+            </Notice>
           )}
           {diff !== null && (
-            <div ref={diffBox}>
-              <DiffView text={diff.text} />
-            </div>
+            <DiffReview
+              text={diff.text}
+              reviewKey={run.id}
+              workspaceId={run.workspaceId}
+              preferredPtyId={run.live ? run.ptyId : null}
+              selection={
+                canApplyTaskCopy && parsedPaths.length > 0
+                  ? {
+                      picked: pickedSet,
+                      onToggle: toggleFile,
+                      onPickAll: () => setExcluded(new Set()),
+                      onPickNone: () => setExcluded(new Set(parsedPaths)),
+                    }
+                  : undefined
+              }
+            />
           )}
           {snapshot && (diff === null || !diff.text.trim()) && <pre className="pre">{snapshot.trim()}</pre>}
         </div>
