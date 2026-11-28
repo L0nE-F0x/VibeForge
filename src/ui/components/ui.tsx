@@ -299,6 +299,7 @@ export function StatusChip({
   if (status === "running") return <Chip tone="accent">{t("status.running")}</Chip>;
   if (result === "timeout") return <Chip tone="bad">{t("status.timeout")}</Chip>;
   if (result === "stuck") return <Chip tone="warn">{t("status.stuck")}</Chip>;
+  if (result === "limit") return <Chip tone="ok">{t("status.limit")}</Chip>;
   if (isCutOffRun({ status, result, origin, cutOff })) return <Chip tone="bad">{t("status.cutoff")}</Chip>;
   if (status === "failed" || (result === "failed" && !exitCode)) return <Chip tone="bad">{t("status.failed")}</Chip>;
   if (status === "stopped") return <Chip tone="warn">{t("status.stopped")}</Chip>;

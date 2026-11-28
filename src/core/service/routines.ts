@@ -21,6 +21,8 @@ import type { Bin } from "../trash.js";
 import type { Agent, Routine, RunMeta, Schedule } from "../types.js";
 import { applyToWorkspace, copyPatch, insideGitRepo, leftInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
 import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
+import { replyLogFor } from "../replies.js";
+import { LOCAL_ENGINE_ID } from "../local.js";
 import type { ServiceCore } from "./core.js";
 import type { MessageDesk } from "./messages.js";
 import type { TaskDesk } from "./tasks.js";
@@ -768,11 +770,21 @@ export class RoutineDesk {
         run.id,
         stuck
           ? { status: "stopped", result: "stuck", error: "Ended after waiting on a question for its time limit." }
-          : { status: "stopped", result: "timeout", error: "Stopped after reaching its time limit." },
+          : this.readsLog(run)
+            ? { status: "stopped", result: "timeout", error: "Stopped after reaching its time limit." }
+            : // Its turn's end can't be read, so the time limit is how it ends: not a failure.
+              { status: "stopped", result: "limit", error: "Ended at its time limit." },
       );
       await this.core.waitForExit(session.ptyId, 200);
     }
     await this.core.whenIdle();
+  }
+
+  /** Whether VibeForge reads this run's CLI's own session log (so it can tell when a turn ends). */
+  private readsLog(run: RunMeta): boolean {
+    const engine = run.engine === LOCAL_ENGINE_ID ? (run.localHarness ?? "") : run.engine;
+    const row = this.core.store.readEngineRows().find((item) => item.id === engine);
+    return Boolean(engine && replyLogFor(engine, row?.bin ?? engine));
   }
 
   /**

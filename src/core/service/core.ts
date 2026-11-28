@@ -925,7 +925,9 @@ export class ServiceCore {
     const outcome =
       run.result === "timeout"
         ? "hit its time limit"
-        : run.result === "stuck"
+        : run.result === "limit"
+          ? "ended at its time limit"
+          : run.result === "stuck"
           ? "stuck on a question"
           : isCutOffRun(run)
           ? "cut off"

@@ -339,6 +339,20 @@ export function isQuestionForPerson(reply: string | null | undefined, screen?: s
 }
 
 /**
+ * A closing offer after the work is done ("Want me to also open a PR?", "Anything else?",
+ * "Let me know if…"): the turn finished, and nothing waits on the answer. Only clearly optional
+ * offers; a question about the task itself ("Should I delete them?") still waits.
+ */
+const CLOSING_OFFER = /\b(?:anything else|is there anything else|let me know if|(?:do you )?want me to (?:also|go ahead and also)|would you like me to (?:also|next)|shall i also|should i also)\b|\bas well\?\s*$/i;
+
+/** Whether a reply from the CLI's log ends on a closing offer rather than a question about the work. */
+export function endsOnOffer(reply: string | null | undefined): boolean {
+  const lines = meaningfulLines(stripCodeAndUrls(reply ?? "")).map((line) => line.replace(/^>\s?/, ""));
+  const last = lines[lines.length - 1] ?? "";
+  return CLOSING_OFFER.test(last) && !PERSON_PROMPT_LINE.test(last);
+}
+
+/**
  * What a routine turn event from the watcher means. Only the CLI's own log can say a turn
  * finished; a quiet screen can only mean "question" (it waits for a person) or "working" (keep
  * watching), never "finished", so a routine is never ended mid-work. A CLI whose log VibeForge
@@ -352,6 +366,8 @@ export function classifyRoutineTurn(input: {
   hasLogReader: boolean;
 }): Extract<RoutineRunResult, "finished" | "question"> | "working" {
   if (input.fromScreen) return screenAsks(input.screen) || replyAsks(input.reply) ? "question" : "working";
+  // The log says the turn ended on a closing offer: the work is done.
+  if (input.hasLogReader && endsOnOffer(input.reply) && !(input.screen && detectWaitingPrompt(input.screen))) return "finished";
   if (isQuestionForPerson(input.reply, input.screen)) return "question";
   return input.hasLogReader ? "finished" : "working";
 }

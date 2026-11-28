@@ -814,6 +814,15 @@ describe("a routine's failures in a row", () => {
   it("ends a turn only on the CLI's log; a quiet screen can only be a question or still working", () => {
     expect(classifyRoutineTurn({ reply: "Summary complete.", screen: "", fromScreen: false, hasLogReader: true })).toBe("finished");
     expect(classifyRoutineTurn({ reply: "Could you confirm the target branch?", screen: "", fromScreen: false, hasLogReader: true })).toBe("question");
+    // A closing offer after the work is done ends the turn; a question about the work waits.
+    for (const offer of ["Done: 3 files updated.\n\nWant me to also open a PR?", "All tests pass. Anything else?", "Let me know if you'd like changes.", "Would you like me to also update the changelog?"]) {
+      expect(classifyRoutineTurn({ reply: offer, screen: "", fromScreen: false, hasLogReader: true })).toBe("finished");
+    }
+    for (const asked of ["Should I delete the 3 old branches?", "Is it OK to push to main?", "Want me to proceed? (y/n)"]) {
+      expect(classifyRoutineTurn({ reply: asked, screen: "", fromScreen: false, hasLogReader: true })).toBe("question");
+    }
+    // On a screen-only CLI an offer is never taken as the end.
+    expect(classifyRoutineTurn({ reply: "Anything else?", screen: "Anything else?", fromScreen: true, hasLogReader: false })).toBe("question");
     // A screen-only CLI, quiet mid-work: never finished.
     expect(classifyRoutineTurn({ reply: "Running: cargo build --release", screen: "Running: cargo build --release", fromScreen: true, hasLogReader: false })).toBe("working");
     expect(classifyRoutineTurn({ reply: "Done updating dependencies.", screen: "Done updating dependencies.", fromScreen: true, hasLogReader: false })).toBe("working");

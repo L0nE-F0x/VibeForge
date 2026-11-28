@@ -17,7 +17,11 @@ export type RunStatus = "running" | "exited" | "stopped" | "failed";
  * `cutoff` (VibeForge closed or lost the terminal host under it), `failed` (couldn't start, or the
  * CLI quit with an error or a signal).
  */
-export type RoutineRunResult = "finished" | "question" | "timeout" | "stuck" | "cutoff" | "failed";
+/**
+ * How a routine's run ended. "limit": a CLI whose log VibeForge can't read ran until its time limit,
+ * the only way such a run ends on its own; not a failure.
+ */
+export type RoutineRunResult = "finished" | "question" | "timeout" | "limit" | "stuck" | "cutoff" | "failed";
 
 export type TaskStatus = "todo" | "running" | "review" | "done";
 

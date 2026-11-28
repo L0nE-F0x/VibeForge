@@ -495,11 +495,12 @@ describe("routines", () => {
     await workThenQuiet(run.ptyId, "Done updating dependencies.", 60_000);
     expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "running" });
     expect(ctx.svc.listRoutines()[0]).toMatchObject({ stillRunning: true, needsInput: false });
-    // Its time limit ends it, as having hit its limit.
+    // Its time limit ends it: the way such a CLI's run ends, so not a failure.
     pass(15 * 60_000);
     await ctx.svc.tick(new Date(now()));
     await until(() => ctx.svc.getRun(run.runId).run.status !== "running");
-    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "timeout" });
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "limit" });
+    expect(ctx.svc.listRoutines()[0].failStreak).toBe(0);
     ctx.svc.close();
   });
 
@@ -609,7 +610,7 @@ describe("routines", () => {
     pass(2 * 60_000);
     await ctx.svc.tick(new Date(now()));
     await until(() => ctx.svc.getRun(run.runId).run.status !== "running");
-    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "timeout" });
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "limit" });
     ctx.svc.close();
   });
 
@@ -650,7 +651,11 @@ describe("routines", () => {
   it("enforces time limits and counts timed-out and cut-off runs in failStreak", async () => {
     let at = Date.parse("2026-10-01T09:00:00.000Z");
     const ctx = setup({ appStartedAt: new Date(at), now: () => new Date(at) });
-    const agent = await agentIn(ctx, "pasty");
+    // A CLI whose log VibeForge reads, so reaching the limit means it never finished: a failure.
+    const rows = JSON.parse(fs.readFileSync(path.join(ctx.configRoot, "engines.json"), "utf8"));
+    rows.engines.push({ id: "claude", label: "Claude Code", bin: "pasty", args: [] });
+    fs.writeFileSync(path.join(ctx.configRoot, "engines.json"), JSON.stringify(rows));
+    const agent = await agentIn(ctx, "claude");
     const routine = ctx.svc.saveRoutine({ name: "LongJob", agentId: agent.id, schedule: { kind: "every", minutes: 30 }, prompt: "Work", timeoutMinutes: 15 });
 
     // 1) Time limit reached -> stopped with result "timeout".
