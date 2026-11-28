@@ -91,6 +91,7 @@ export class ShellRecorder {
         cwd,
         runId: id,
         runDir: dir,
+        dataRoot: this.core.options.dataRoot,
         onWarn: (message) => this.core.options.host.logWarn?.(message),
       });
     };

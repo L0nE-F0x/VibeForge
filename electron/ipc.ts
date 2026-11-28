@@ -327,7 +327,13 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
     "runs.markdown": (id) => s().runMarkdown(id),
     "runs.restorePreview": (id) => s().previewRunRestore(String(id ?? "")),
-    "runs.restore": (id) => s().restoreRun(String(id ?? "")),
+    "runs.restore": (id, picks) =>
+      s().restoreRun(
+        String(id ?? ""),
+        (Array.isArray(picks) ? picks : [])
+          .filter((pick): pick is { path: string; expect: string } => typeof pick?.path === "string" && typeof pick?.expect === "string")
+          .map((pick) => ({ path: pick.path, expect: pick.expect })),
+      ),
     "runs.undoRestore": (token) => s().undoRunRestore(String(token ?? "")),
     "storage.summary": () => s().storageSummary(),
     "storage.tidy": () => s().maintainRuns(),

@@ -17,10 +17,13 @@ import type {
   RunRestoreAvailability,
   RunRestorePreview,
   RunRestoreResult,
+  RunRestoreUndoResult,
   RunUpkeep,
   RunView,
   LeftAloneReason,
   RestoreFileAction,
+  RestoreItem,
+  RestorePick,
   SchedulePreview,
   SendResult,
   SkillInput,
@@ -150,10 +153,13 @@ export type {
   RunRestoreAvailability,
   RunRestorePreview,
   RunRestoreResult,
+  RunRestoreUndoResult,
   RunUpkeep,
   RunView,
   LeftAloneReason,
   RestoreFileAction,
+  RestoreItem,
+  RestorePick,
   Schedule,
   SchedulePreview,
   StorageSummary,
@@ -596,10 +602,10 @@ export interface DeskMethods {
   "runs.markdown": (id: string) => string;
   /** Preview which files will be restored vs. left alone if putting files back as before this run. */
   "runs.restorePreview": (id: string) => RunRestorePreview;
-  /** Put files back as before this run (only files still matching the end snapshot). */
-  "runs.restore": (id: string) => RunRestoreResult;
-  /** Put the run's end state back for the exact files restored by `runs.restore`. */
-  "runs.undoRestore": (token: string) => void;
+  /** Put back exactly the files confirmed from the preview (path and what was on disk then); anything changed since is left alone. */
+  "runs.restore": (id: string, picks: RestorePick[]) => RunRestoreResult;
+  /** Put the run's end state back for the exact files restored by `runs.restore`, saying which it left alone. */
+  "runs.undoRestore": (token: string) => RunRestoreUndoResult;
 
   /** Where VibeForge's disk space goes. */
   "storage.summary": () => StorageSummary;

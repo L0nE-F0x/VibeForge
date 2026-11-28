@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowUpRight,
   Bot,
   CheckCheck,
@@ -24,7 +25,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { RunRestoreAvailability, RunRestorePreview, RunView, Topic } from "../../shared/api.js";
+import type { RunRestoreAvailability, RunRestorePreview, RunRestoreUndoResult, RunView, Topic } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
 import { splitPatch } from "../../shared/review.js";
 import { duration, tildify } from "../../shared/text.js";
@@ -241,13 +242,35 @@ function summarizeFiles(files: string[]): string {
   return files.length > 6 ? `${shown}, …` : shown;
 }
 
+const LEFT_ALONE_BODY = {
+  changed: "runs.restoredLeftChanged",
+  oversized: "runs.restoredLeftOversized",
+  submodule: "runs.restoredLeftSubmodule",
+  filtered: "runs.restoredLeftFiltered",
+} as const;
+
+const LEFT_ALONE_LABEL = {
+  changed: "runs.restoreReasonChanged",
+  oversized: "runs.restoreReasonOversized",
+  submodule: "runs.restoreReasonSubmodule",
+  filtered: "runs.restoreReasonFiltered",
+} as const;
+
 function leftAloneBody(leftAlone: RunRestorePreview["leftAlone"], t: Translator): string | undefined {
-  const changed = leftAlone.filter((item) => item.reason === "changed").map((item) => item.path);
-  const oversized = leftAlone.filter((item) => item.reason === "oversized").map((item) => item.path);
   const parts: string[] = [];
-  if (changed.length) parts.push(t("runs.restoredLeftChanged", { files: summarizeFiles(changed) }));
-  if (oversized.length) parts.push(t("runs.restoredLeftOversized", { files: summarizeFiles(oversized) }));
+  for (const reason of Object.keys(LEFT_ALONE_BODY) as Array<keyof typeof LEFT_ALONE_BODY>) {
+    const files = leftAlone.filter((item) => item.reason === reason).map((item) => item.path);
+    if (files.length) parts.push(t(LEFT_ALONE_BODY[reason], { files: summarizeFiles(files) }));
+  }
   return parts.length ? parts.join(" ") : undefined;
+}
+
+/** What Undo of a restore did: all of it, some of it (saying which files it left), or none. */
+function undoRestoreToast(result: RunRestoreUndoResult, t: Translator): { tone: "info" | "error"; title: string; body?: string } {
+  if (!result.leftAlone.length) return { tone: "info", title: t("runs.restoreUndone") };
+  const body = t("runs.restoreUndoLeft", { files: summarizeFiles(result.leftAlone) });
+  if (!result.reverted.length) return { tone: "error", title: t("runs.restoreUndoNothing"), body };
+  return { tone: "info", title: t("runs.restoreUndonePartly", { done: String(result.reverted.length), total: String(result.reverted.length + result.leftAlone.length) }), body };
 }
 
 function RestoreConfirmModal({
@@ -291,9 +314,22 @@ function RestoreConfirmModal({
         <Notice>{preview.leftAlone.length > 0 ? t("runs.restoreNoneLeft") : t("runs.restoreAlreadyBack")}</Notice>
       ) : (
         <>
+          {preview.overlapping.length > 0 && (
+            <Notice tone="warn" icon={AlertTriangle}>
+              {t("runs.restoreOverlap", { runs: preview.overlapping.map((other) => other.title).join(", ") })}
+            </Notice>
+          )}
+          {preview.lateEnd && (
+            <Notice tone="warn" icon={AlertTriangle}>
+              {t("runs.restoreLateEnd")}
+            </Notice>
+          )}
           <div className="muted" style={{ lineHeight: 1.55 }}>
             {t.count("runs.restoreCount", preview.restorable.length)}
             {preview.leftAlone.length > 0 ? ` ${t.count("runs.restoreLeftCount", preview.leftAlone.length)}` : ""}
+          </div>
+          <div className="muted" style={{ lineHeight: 1.55 }}>
+            {t("runs.restoreHereToo")} {t("runs.restoreIgnoredNote")}
           </div>
           <div className="branch-list">
             {preview.restorable.map((item) => (
@@ -314,7 +350,7 @@ function RestoreConfirmModal({
             {preview.leftAlone.map((item) => (
               <div key={item.path} className="hstack" style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)" }}>
                 <span className="faint" style={{ fontSize: "var(--fs-xs)", minWidth: 96 }}>
-                  {t(item.reason === "oversized" ? "runs.restoreReasonOversized" : "runs.restoreReasonChanged")}
+                  {t(LEFT_ALONE_LABEL[item.reason])}
                 </span>
                 <span className="mono truncate grow">{item.path}</span>
               </div>
@@ -398,8 +434,13 @@ export function RunDetail({
     setRestorePreview(await call("runs.restorePreview", run.id));
   }, t("runs.restoreFailed"));
   const [confirmRestore, applyingRestore] = useAction(async () => {
-    if (!run) return;
-    const result = await call("runs.restore", run.id);
+    if (!run || !restorePreview) return;
+    // Exactly what the preview showed: a file that changed since is left alone.
+    const result = await call(
+      "runs.restore",
+      run.id,
+      restorePreview.restorable.map((item) => ({ path: item.path, expect: item.expect })),
+    );
     setRestorePreview(null);
     if (result.restored.length === 0) {
       push("info", t("runs.restoreNothingDone"), leftAloneBody(result.leftAlone, t));
@@ -414,7 +455,10 @@ export function RunDetail({
             label: t("common.undo"),
             run: () =>
               void call("runs.undoRestore", result.undo!)
-                .then(() => push("info", t("runs.restoreUndone")))
+                .then((undone) => {
+                  const toast = undoRestoreToast(undone, t);
+                  push(toast.tone, toast.title, toast.body);
+                })
                 .catch((error: unknown) => fail(error, t("common.undoFailed"))),
           }
         : undefined,

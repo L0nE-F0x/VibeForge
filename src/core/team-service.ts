@@ -25,7 +25,7 @@ import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
 import type { MemoryProposal } from "../shared/memory.js";
-import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RunRestorePreview, RunRestoreResult, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
+import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RestorePick, RunRestorePreview, RunRestoreResult, RunRestoreUndoResult, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -711,15 +711,11 @@ export class TeamService extends ServiceCore {
     return this.runs.previewRestore(id);
   }
 
-  restoreRun(id: string): Promise<RunRestoreResult> {
-    return this.runs.restoreRun(id);
+  restoreRun(id: string, picks: readonly RestorePick[]): Promise<RunRestoreResult> {
+    return this.runs.restoreRun(id, picks);
   }
 
-  undoRunRestore(token: string): Promise<void> {
-    return this.undoRunRestoreImpl(token);
-  }
-
-  private undoRunRestoreImpl(token: string): Promise<void> {
+  override undoRunRestore(token: string): Promise<RunRestoreUndoResult> {
     return super.undoRunRestore(token);
   }
 

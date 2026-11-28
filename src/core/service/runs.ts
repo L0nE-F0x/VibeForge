@@ -15,6 +15,8 @@ import {
   previewRunRestore,
   removeRunSnapshots,
   restoreRunFiles,
+  sweepRunSnapshots,
+  type RestorePick,
   type RunRestorePreview,
   type RunRestoreResult,
 } from "../snapshots.js";
@@ -101,16 +103,19 @@ export class RunDesk {
 
   /** Preview which files from this run can be put back and which will be left alone. */
   async previewRestore(id: string): Promise<RunRestorePreview> {
-    await this.core.settled;
+    await this.core.lateSnapshots;
     const run = this.core.store.getRun(id);
-    return previewRunRestore(run, this.core.options.dataRoot);
+    return previewRunRestore(run, this.core.options.dataRoot, this.core.store.allRuns());
   }
 
-  /** Put files back as before `run` where untouched since, keeping an Undo token for those exact files. */
-  async restoreRun(id: string): Promise<RunRestoreResult> {
-    await this.core.settled;
+  /**
+   * Put back exactly the files the person confirmed in the preview (`picks`), where still as the
+   * preview found them, keeping an Undo token for those exact files.
+   */
+  async restoreRun(id: string, picks: readonly RestorePick[]): Promise<RunRestoreResult> {
+    await this.core.lateSnapshots;
     const run = this.core.store.getRun(id);
-    const { result, undoData } = await restoreRunFiles(run, this.core.options.dataRoot);
+    const { result, undoData } = await restoreRunFiles(run, this.core.options.dataRoot, picks, this.core.store.allRuns());
     const undo = undoData ? this.core.keepRestoreForUndo(undoData) : null;
     if (result.restored.length > 0) this.core.emit("workspaces");
     return { ...result, undo };
@@ -282,6 +287,13 @@ export class RunDesk {
       this.sizes.delete(run.id);
       result.removed += 1;
       result.freed += freed;
+    }
+    // Snapshot refs whose run is gone (deleted outside VibeForge too) or older than 30 days.
+    await this.core.lateSnapshots;
+    try {
+      await sweepRunSnapshots({ dataRoot: this.core.options.dataRoot, getRun: (id) => this.core.store.getRun(id), now: this.core.now() });
+    } catch {
+      /* tried again at the next pass */
     }
     const ended = new Set(runs.map((run) => run.id));
     for (const id of this.sizes.keys()) if (!ended.has(id)) this.sizes.delete(id);

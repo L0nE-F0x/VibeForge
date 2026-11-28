@@ -9,13 +9,16 @@ import type { SessionLog } from "../session-ids.js";
 import type {
   LeftAloneReason,
   RestoreFileAction,
+  RestoreItem,
+  RestorePick,
   RunRestoreAvailability,
   RunRestorePreview,
   RunRestoreResult,
+  RunRestoreUndoResult,
 } from "../snapshots.js";
 import type { Waiting } from "./turns.js";
 
-export type { LeftAloneReason, RestoreFileAction, RunRestoreAvailability, RunRestorePreview, RunRestoreResult };
+export type { LeftAloneReason, RestoreFileAction, RestoreItem, RestorePick, RunRestoreAvailability, RunRestorePreview, RunRestoreResult, RunRestoreUndoResult };
 
 // ------------------------------------------------------------------ host contract
 

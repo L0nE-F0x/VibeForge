@@ -7,7 +7,7 @@ import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl, t
 import { normalizeLocalServer, normalizeVibyRoute, vibyLocalModel } from "../../shared/local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
-import { applyUndoRestore, isRunInCopy, removeRunSnapshots, takeEndSnapshot, takeStartSnapshot, type RestoreUndoData } from "../snapshots.js";
+import { applyUndoRestore, isRunInCopy, markLateEndTried, needsLateEndSnapshot, removeRunSnapshots, takeEndSnapshot, takeStartSnapshot, type RestoreUndoData, type RunRestoreUndoResult } from "../snapshots.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile, readRunTail } from "../run-storage.js";
@@ -84,6 +84,8 @@ export class ServiceCore {
   protected closed = false;
   private closePromise: Promise<void> | null = null;
   readonly settled: Promise<void>;
+  /** Resolves once runs cut off by the last close have their end snapshots (see settleCutOffSnapshots). */
+  readonly lateSnapshots: Promise<void>;
 
   constructor(options: DeskOptions) {
     this.options = options;
@@ -96,6 +98,8 @@ export class ServiceCore {
     // Anything still "running" in the index belongs to a process that died with the last app session.
     const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
     this.settled = Promise.all([this.settleOrphans(orphans), this.settleTrash(trashed)]).then(() => undefined);
+    // Then, without holding anything up, the end snapshots those runs never got.
+    this.lateSnapshots = this.settled.then(() => this.settleCutOffSnapshots()).catch(() => undefined);
   }
 
   whenSettled(): Promise<void> {
@@ -177,14 +181,15 @@ export class ServiceCore {
     return token;
   }
 
-  /** Undo a previous "Put files back as before this run" action. */
-  async undoRunRestore(token: string): Promise<void> {
+  /** Undo a previous "Put files back as before this run" action, saying which files it had to leave alone. */
+  async undoRunRestore(token: string): Promise<RunRestoreUndoResult> {
     const entry = this.restoreUndos.get(token);
     if (!entry) throw new Error("It is too late to undo that.");
     clearTimeout(entry.timer);
     this.restoreUndos.delete(token);
-    const reverted = await applyUndoRestore(entry.data);
-    if (reverted.length > 0) this.emit("workspaces");
+    const result = await applyUndoRestore(entry.data);
+    if (result.reverted.length > 0) this.emit("workspaces");
+    return result;
   }
 
   // ---------------------------------------------------------------- input into a pane
@@ -727,6 +732,7 @@ export class ServiceCore {
         cwd: input.cwd,
         runId: id,
         runDir: dir,
+        dataRoot: this.options.dataRoot,
         onWarn: (message) => this.options.host.logWarn?.(message),
       });
     };
@@ -988,8 +994,6 @@ export class ServiceCore {
         if (!hasRunFile(dir, RUN_FILES.patch)) await this.writePatch(run, LATE_PATCH_NOTE);
       }
       if (this.closed) return;
-      await removeRunSnapshots(run);
-      if (this.closed) return;
       this.store.saveRun({
         ...run,
         status: "stopped",
@@ -1014,6 +1018,31 @@ export class ServiceCore {
       if (noted && runIds.some((id) => noted.runIds.includes(id))) this.noteCutOff({ ...noted, runIds: [...new Set([...noted.runIds, ...runIds])] });
       else if (runIds.length) this.noteCutOff({ reason: "crash", at: this.now().toISOString(), runIds, offered: true });
       this.emit("runs", "tasks", "routines");
+    }
+  }
+
+  /**
+   * A run a close cut off may have ended before its end snapshot was saved: the folder as this
+   * start finds it stands in for that, marked as taken late, so the run keeps its undo.
+   */
+  private async lateEndSnapshot(run: RunMeta): Promise<void> {
+    if (!run.dir || !run.cwd || isRunInCopy(run.cwd, this.options.dataRoot) || !needsLateEndSnapshot(run)) return;
+    const done = await takeEndSnapshot({
+      cwd: run.cwd,
+      runId: run.id,
+      runDir: run.dir,
+      late: true,
+      onWarn: (message) => this.options.host.logWarn?.(message),
+    });
+    // Tried once: a folder too big to snapshot isn't tried again at every start.
+    if (!done) markLateEndTried(run);
+  }
+
+  /** Runs a crash, quit or update cut off whose end snapshot didn't get saved in time. */
+  private async settleCutOffSnapshots(): Promise<void> {
+    for (const run of this.store.allRuns()) {
+      if (this.closed) return;
+      if (run.cutOff && run.status !== "running") await this.lateEndSnapshot(run);
     }
   }
 
